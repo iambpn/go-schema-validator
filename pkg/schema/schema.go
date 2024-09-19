@@ -26,7 +26,6 @@ func New() *Schema {
 }
 
 // Generic method for adding validations
-// ...message for optional error message
 func (s *Schema) AddValidation(rule string, message ...string) *Schema {
 	msg := ""
 	if len(message) > 0 {
@@ -45,6 +44,7 @@ func (s *Schema) compileRules() string {
 	return strings.Join(rules, ",")
 }
 
+// Method to create a struct validation
 func (s *Schema) Struct() *structValidation {
 	return &structValidation{
 		validator: s.validator,
@@ -52,6 +52,7 @@ func (s *Schema) Struct() *structValidation {
 	}
 }
 
+// Method to validate a non-struct value
 func (s *Schema) Validate(value interface{}) (err error) {
 	// recover from panics and return them as errors
 	defer func() {

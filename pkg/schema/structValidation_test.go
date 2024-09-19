@@ -28,7 +28,7 @@ func TestField(t *testing.T) {
 		t.Errorf("Expected 2 fields, got %v", len(structVal.rules))
 	}
 
-	for fieldName, _ := range structVal.rules {
+	for fieldName := range structVal.rules {
 		if fieldName != nameField && fieldName != ageField {
 			t.Errorf("Expected field name to be %s or %s, got %s", nameField, ageField, fieldName)
 		}

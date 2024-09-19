@@ -1,4 +1,4 @@
-module go-validator-schema
+module go-schema-validator
 
 go 1.23.0
 

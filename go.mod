@@ -1,4 +1,4 @@
-module go-schema-validator
+module github.com/iambpn/go-schema-validator
 
 go 1.23.0
 

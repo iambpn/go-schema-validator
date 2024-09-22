@@ -1,3 +1,4 @@
+// Deprecated: use github.com/iambpn/go-schema-validator/v2 instead.
 module github.com/iambpn/go-schema-validator
 
 go 1.23.0

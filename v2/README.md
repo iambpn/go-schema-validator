@@ -9,7 +9,7 @@ This package is the wrapper around [go-playground/validator](https://github.com/
 ## Install Package
 
 ```bash
-go get github.com/iambpn/go-schema-validator/schema
+go get github.com/iambpn/go-schema-validator/v2
 ```
 
 ## Usage
@@ -19,7 +19,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/iambpn/go-schema-validator/schema"
+	"github.com/iambpn/go-schema-validator/v2/schema"
 )
 
 func main() {

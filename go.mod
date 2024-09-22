@@ -1,5 +1,4 @@
-// Deprecated: use github.com/iambpn/go-schema-validator/v2 instead.
-module github.com/iambpn/go-schema-validator
+module github.com/iambpn/go-schema-validator/v2
 
 go 1.23.0
 
@@ -14,10 +13,4 @@ require (
 	golang.org/x/net v0.21.0 // indirect
 	golang.org/x/sys v0.17.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
-)
-
-retract (
-	v1.0.4-rc // incorrect publication
-	v1.0.3 // incorrect publication
-	v1.0.2 // incorrect publication
 )

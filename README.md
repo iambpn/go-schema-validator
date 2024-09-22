@@ -19,7 +19,7 @@ package main
 
 import (
 	"fmt"
-	"go-schema-validator/schema"
+	"github.com/iambpn/go-schema-validator/schema"
 )
 
 func main() {

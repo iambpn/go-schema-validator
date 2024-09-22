@@ -77,6 +77,14 @@ func main() {
 
 ## Resources
 
+**Dependencies**
+
 - [Go validator](https://github.com/go-playground/validator)
-- [Go publish package](https://go.dev/doc/modules/publishing)
+
+**Go Module Publishing**
+
 - [Go pkg site](https://pkg.go.dev/about)
+- [Go publish package](https://go.dev/doc/modules/publishing)
+
+- [Go publishing-go-modules](https://go.dev/blog/publishing-go-modules)
+- [Go v2 and beyond](https://go.dev/blog/v2-go-modules)

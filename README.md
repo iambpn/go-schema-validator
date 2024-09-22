@@ -1,4 +1,4 @@
-# go-schema-validator
+# go-schema-validator (v1 is depreciated, please refer to [v2](./v2/README.md))
 
 golang-schema-validator is a zod like API used to validation user input. It allows user to define a validation schema and add a custom message while creating validation schema and returns the custom message on validation failed.
 
@@ -9,7 +9,7 @@ This package is the wrapper around [go-playground/validator](https://github.com/
 ## Install Package
 
 ```bash
-go get github.com/iambpn/go-schema-validator/schema
+go get github.com/iambpn/go-schema-validator
 ```
 
 ## Usage
@@ -19,7 +19,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/iambpn/go-schema-validator/schema"
+	"github.com/iambpn/go-schema-validator"
 )
 
 func main() {

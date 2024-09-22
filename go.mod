@@ -16,6 +16,7 @@ require (
 )
 
 retract (
-	v1.0.3
-	v1.0.2
+	v1.0.4-rc // incorrect publication
+	v1.0.3 // incorrect publication
+	v1.0.2 // incorrect publication
 )

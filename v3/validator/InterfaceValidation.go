@@ -20,7 +20,7 @@ type CustomValidate[T any] interface {
 	CustomValidate(data *T, sv *StructValidator[T]) error
 }
 
-// ValidateStruct Method validates the data against generic struct that had
+// ValidateStruct Method validates the data to generic struct that had
 // implemented ValidationRules or CustomValidate interface.
 //
 // data can be either struct or io.Reader

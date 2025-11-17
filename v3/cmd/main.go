@@ -57,7 +57,7 @@ func main() {
 		Age:   15,
 	}
 
-	err = userSchema.ValidateStruct(&user)
+	err = userSchema.Validate(&user)
 	if err != nil {
 		fmt.Println("User validation error:", err)
 	}

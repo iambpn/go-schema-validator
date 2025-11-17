@@ -42,7 +42,7 @@ func TestCompileRules(t *testing.T) {
 	}
 }
 
-func TestValidate(t *testing.T) {
+func TestValidatorValidate(t *testing.T) {
 	schema := New()
 
 	if schema == nil {

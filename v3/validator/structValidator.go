@@ -7,7 +7,13 @@ import (
 	"reflect"
 
 	pgValidator "github.com/go-playground/validator/v10"
+	"github.com/iambpn/go-schema-validator/v3/internal/config"
 )
+
+type ValidationError struct {
+	Field    string   `json:"field"`
+	Messages []string `json:"messages"`
+}
 
 type StructValidator[T any] struct {
 	pgValidate *pgValidator.Validate
@@ -34,7 +40,9 @@ func (sv *StructValidator[T]) AddFieldRules(name string, addRules func(*Validato
 }
 
 // Method to validate a struct
-func (sv *StructValidator[T]) Validate(structVal *T) error {
+func (sv *StructValidator[T]) Validate(structVal *T, configs ...config.Config) []ValidationError {
+	mergedConfig := config.MergeConfigs(configs...)
+
 	val := reflect.ValueOf(structVal)
 
 	if val.Kind() == reflect.Pointer {
@@ -42,31 +50,72 @@ func (sv *StructValidator[T]) Validate(structVal *T) error {
 	}
 
 	if val.Kind() != reflect.Struct {
-		return fmt.Errorf("argument value must be a struct")
+		valErrs := []ValidationError{}
+		valErrs = append(valErrs, ValidationError{Messages: []string{"argument value must be a struct"}})
+		return valErrs
 	}
 
+	valErrMap := make(map[string][]string)
 	for fieldName, validator := range sv.rules {
 		field := val.FieldByName(fieldName)
 
 		// check if value is exist and is usable
 		if !field.IsValid() {
-			return fmt.Errorf("field %s does not exist", fieldName)
+			if mergedConfig[config.ReturnEarly] {
+				return []ValidationError{{
+					Field:    fieldName,
+					Messages: []string{fmt.Sprintf("field %s does not exist", fieldName)},
+				}}
+			}
+
+			if arr, ok := valErrMap[fieldName]; ok {
+				arr = append(arr, fmt.Sprintf("field %s does not exist", fieldName))
+				valErrMap[fieldName] = arr
+			} else {
+				valErrMap[fieldName] = []string{fmt.Sprintf("field %s does not exist", fieldName)}
+			}
 		}
 
 		err := validator.Validate(field.Interface())
 		if err != nil {
-			return fmt.Errorf("%w", err)
+			if mergedConfig[config.ReturnEarly] {
+				return []ValidationError{{
+					Field:    fieldName,
+					Messages: []string{fmt.Sprintf("%s", err)},
+				}}
+			}
+
+			if arr, ok := valErrMap[fieldName]; ok {
+				arr = append(arr, fmt.Sprintf("%s", err))
+				valErrMap[fieldName] = arr
+			} else {
+				valErrMap[fieldName] = []string{fmt.Sprintf("%s", err)}
+			}
 		}
 	}
+
+	if len(valErrMap) > 0 {
+		valErrs := []ValidationError{}
+		for field, messages := range valErrMap {
+			valErrs = append(valErrs, ValidationError{
+				Field:    field,
+				Messages: messages,
+			})
+		}
+		return valErrs
+	}
+
 	return nil
 }
 
 // Method to validate a struct from any type
-func (sv *StructValidator[T]) ValidateAny(structKind any) (*T, error) {
+func (sv *StructValidator[T]) ValidateAny(structKind any) (*T, []ValidationError) {
 	structVal, ok := structKind.(T)
 
 	if !ok {
-		return nil, fmt.Errorf("value must be of type %T", structVal)
+		return nil, []ValidationError{{
+			Messages: []string{"argument value type is not valid"},
+		}}
 	}
 
 	err := sv.Validate(&structVal)
@@ -77,17 +126,19 @@ func (sv *StructValidator[T]) ValidateAny(structKind any) (*T, error) {
 // Method to validate a struct from an io.Reader
 // To prevent memory leak make sure to close the reader after calling this method
 // e.g: defer reader.Close()
-func (sv *StructValidator[T]) ValidateIOReader(reader io.Reader) (*T, error) {
+func (sv *StructValidator[T]) ValidateIOReader(reader io.Reader) (*T, []ValidationError) {
 	var structVal T
 
 	err := json.NewDecoder(reader).Decode(&structVal)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode struct from reader: %w", err)
+		return nil, []ValidationError{{
+			Messages: []string{fmt.Sprintf("failed to decode struct from reader: %s", err)},
+		}}
 	}
 
-	err = sv.Validate(&structVal)
-	if err != nil {
-		return nil, fmt.Errorf("validation failed: %w", err)
+	valErr := sv.Validate(&structVal)
+	if valErr != nil {
+		return nil, valErr
 	}
 
 	return &structVal, nil

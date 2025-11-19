@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/iambpn/go-schema-validator/v3/internal/config"
 )
 
 type User struct {
@@ -42,7 +44,7 @@ func TestField(t *testing.T) {
 	}
 }
 
-func assertErrorMessage[T any](val *T, sv *StructValidator[T], errMsg string, t *testing.T) {
+func assertFirstErrorMessage[T any](val *T, sv *StructValidator[T], field string, errMsg string, t *testing.T) {
 	t.Helper()
 
 	err := sv.Validate(val)
@@ -51,8 +53,12 @@ func assertErrorMessage[T any](val *T, sv *StructValidator[T], errMsg string, t 
 		t.Fatalf("Expected validation to fail, got nil")
 	}
 
-	if err.Error() != errMsg {
-		t.Fatalf("Expected error message to be '%s', got '%s'", errMsg, err.Error())
+	if err[0].Messages[0] != errMsg {
+		t.Fatalf("Expected error message to be '%s', got '%s'", errMsg, err[0].Messages[0])
+	}
+
+	if err[0].Field != field {
+		t.Fatalf("Expected error field to be '%s', got '%s'", field, err[0].Field)
 	}
 }
 
@@ -77,20 +83,20 @@ func TestStructValidatorValidateChainedRules(t *testing.T) {
 		v.AddRule("min=18", ageGt18Message)
 	})
 
-	assertErrorMessage(&User{
+	assertFirstErrorMessage(&User{
 		Name: "",
 		Age:  18,
-	}, &structVal, nameRequiredMessage, t)
+	}, &structVal, nameField, nameRequiredMessage, t)
 
-	assertErrorMessage(&User{
+	assertFirstErrorMessage(&User{
 		Name: "a",
 		Age:  18,
-	}, &structVal, nameMin2Message, t)
+	}, &structVal, nameField, nameMin2Message, t)
 
-	assertErrorMessage(&User{
+	assertFirstErrorMessage(&User{
 		Name: "aa",
 		Age:  0,
-	}, &structVal, ageGt18Message, t)
+	}, &structVal, ageField, ageGt18Message, t)
 }
 
 func TestStructValidatorValidate(t *testing.T) {
@@ -133,31 +139,13 @@ func TestStructValidatorValidate(t *testing.T) {
 		Name: "",
 		Age:  18,
 	}
-
-	err = structVal.Validate(&noNameUser)
-
-	if err == nil {
-		t.Errorf("Expected error on empty name, got %v", err)
-	}
-
-	if err.Error() != nameRequiredMessage {
-		t.Errorf("Expected error message to be '%s', got '%v'", nameRequiredMessage, err)
-	}
+	assertFirstErrorMessage(&noNameUser, &structVal, nameField, nameRequiredMessage, t)
 
 	noAgeUser := User{
 		Name: "John",
 		Age:  0,
 	}
-
-	err = structVal.Validate(&noAgeUser)
-
-	if err == nil {
-		t.Errorf("Expected error on zero age, got %v", err)
-	}
-
-	if err.Error() != ageGt18Message {
-		t.Errorf("Expected error message to be '%s', got '%v'", ageGt18Message, err)
-	}
+	assertFirstErrorMessage(&noAgeUser, &structVal, ageField, ageGt18Message, t)
 }
 
 func TestNewStruct(t *testing.T) {
@@ -202,16 +190,8 @@ func TestValidateStruct_NonStruct(t *testing.T) {
 
 	var anyValue any = "not a struct"
 
-	err := sv.Validate(&anyValue)
-
-	if err == nil {
-		t.Fatalf("Expected error when validating a non-struct, got nil")
-	}
-
 	expected := "argument value must be a struct"
-	if err.Error() != expected {
-		t.Fatalf("Expected error message '%s', got '%v'", expected, err)
-	}
+	assertFirstErrorMessage(&anyValue, &sv, "", expected, t)
 }
 
 func TestValidateStruct_FieldDoesNotExist(t *testing.T) {
@@ -225,19 +205,13 @@ func TestValidateStruct_FieldDoesNotExist(t *testing.T) {
 		v.AddRule("required", "UnknownField is required")
 	})
 
-	err := sv.Validate(&User{
+	expected := "field UnknownField does not exist"
+	usr := &User{
 		Name: "John",
 		Age:  30,
-	})
-
-	if err == nil {
-		t.Fatalf("Expected error for missing field, got nil")
 	}
 
-	expected := "field UnknownField does not exist"
-	if err.Error() != expected {
-		t.Fatalf("Expected error message '%s', got '%v'", expected, err)
-	}
+	assertFirstErrorMessage(usr, &sv, "UnknownField", expected, t)
 }
 
 func TestValidateStruct_PointerInput(t *testing.T) {
@@ -286,13 +260,58 @@ func TestValidateStruct_IoReaderInput(t *testing.T) {
 
 	reader := strings.NewReader(string(bytes))
 
-	user, err := sv.ValidateIOReader(reader)
+	user, valErr := sv.ValidateIOReader(reader)
 
-	if err != nil {
-		t.Fatalf("Expected nil when validating io.Reader, got %v", err)
+	if valErr != nil {
+		t.Fatalf("Expected nil when validating io.Reader, got %v", valErr[0].Messages[0])
 	}
 
 	if (*user) != originalUser {
 		t.Fatalf("Expected returned user to be same as Original User, got %v", user)
+	}
+}
+
+func TestValidateStructMultipleErrors(t *testing.T) {
+	sv := StructValidator[User]{
+		pgValidate: nil,
+		rules:      make(map[string]*Validator),
+	}
+
+	sv.AddFieldRules("Name", func(v *Validator) {
+		v.AddRule("required", "Name is required")
+		v.AddRule("min=3", "Name must be at least 3 characters")
+	})
+	sv.AddFieldRules("Age", func(v *Validator) {
+		v.AddRule("min=18", "Age must be at least 18")
+	})
+
+	user := User{
+		Name: "Al",
+		Age:  15,
+	}
+
+	err := sv.Validate(&user, config.SetReturnEarly(false))
+
+	if err == nil {
+		t.Fatalf("Expected validation to fail, got nil")
+	}
+
+	if len(err) != 2 {
+		t.Fatalf("Expected 2 validation errors, got %d", len(err))
+	}
+
+	for _, valErr := range err {
+		switch valErr.Field {
+		case "Name":
+			if len(valErr.Messages) != 1 || valErr.Messages[0] != "Name must be at least 3 characters" {
+				t.Fatalf("Unexpected error messages for Name field: %v", valErr.Messages)
+			}
+		case "Age":
+			if len(valErr.Messages) != 1 || valErr.Messages[0] != "Age must be at least 18" {
+				t.Fatalf("Unexpected error messages for Age field: %v", valErr.Messages)
+			}
+		default:
+			t.Fatalf("Unexpected field in validation errors: %s", valErr.Field)
+		}
 	}
 }

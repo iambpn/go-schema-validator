@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/iambpn/go-schema-validator/v3/internal/config"
 )
 
 // ValidationRules Interface for adding validation rule for struct validation
@@ -17,7 +19,7 @@ type ValidationRules[T any] interface {
 // T is the struct type
 // Implement the CustomValidate method to add custom validation logic
 type CustomValidate[T any] interface {
-	CustomValidate(data *T, sv *StructValidator[T]) error
+	CustomValidate(data *T, sv *StructValidator[T]) []ValidationError
 }
 
 // ValidateStruct Method validates the data to generic struct that had
@@ -25,7 +27,7 @@ type CustomValidate[T any] interface {
 //
 // data can be either struct or io.Reader
 // Returns pointer to validated struct and error if validation fails
-func ValidateStruct[S any](data any) (*S, error) {
+func ValidateStruct[S any](data any, configs ...config.Config) (*S, []ValidationError) {
 	val := new(S)
 
 	// check if data is reader
@@ -33,12 +35,23 @@ func ValidateStruct[S any](data any) (*S, error) {
 		err := json.NewDecoder(reader).Decode(val)
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to decode '%T' struct from provided reader: %w", val, err)
+			valErrs := []ValidationError{}
+			valErr := ValidationError{
+				Messages: []string{fmt.Sprintf("failed to decode '%T' struct from provided reader: %s", val, err)},
+			}
+			valErrs = append(valErrs, valErr)
+			return nil, valErrs
 		}
 	} else if structVal, ok := data.(S); ok {
 		val = &structVal
 	} else {
-		return nil, fmt.Errorf("data must be either io.Reader or %T struct", *val)
+		valErrs := []ValidationError{}
+		valErr := ValidationError{
+			Messages: []string{fmt.Sprintf("data must be either io.Reader or %T struct", *val)},
+		}
+		valErrs = append(valErrs, valErr)
+
+		return nil, valErrs
 	}
 
 	// validate struct with validation rules
@@ -46,18 +59,18 @@ func ValidateStruct[S any](data any) (*S, error) {
 		sv := NewStruct[S]()
 		validateRuleInf.ValidationRules(sv)
 
-		var err error
+		var valErrs []ValidationError = nil
 		if validateInf, ok := any(val).(CustomValidate[S]); ok {
 			// user specified validation
-			err = validateInf.CustomValidate(val, sv)
+			valErrs = validateInf.CustomValidate(val, sv)
 		} else {
 			// default struct validation
-			err = sv.Validate(val)
+			valErrs = sv.Validate(val, configs...)
 		}
 
-		if err != nil {
+		if valErrs != nil {
 			// return validation error
-			return nil, err
+			return nil, valErrs
 		}
 
 		return val, nil
@@ -77,5 +90,10 @@ func ValidateStruct[S any](data any) (*S, error) {
 		return val, nil
 	}
 
-	return nil, fmt.Errorf("type %T does not implement neither ValidationRule[%T] nor Validate[%T] interface from (Go-Schema-Validator)", val, *val, *val)
+	valErrs := []ValidationError{}
+	valErr := ValidationError{
+		Messages: []string{fmt.Sprintf("struct '%T' does not implement neither ValidationRules[%T] nor CustomValidate[%T] interface from (Go-Schema-Validator)", val, *val, *val)},
+	}
+	valErrs = append(valErrs, valErr)
+	return nil, valErrs
 }

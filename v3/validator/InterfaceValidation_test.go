@@ -3,10 +3,10 @@ package validator
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/iambpn/go-schema-validator/v3/internal/config"
 )
 
 // implement Validate interface for User struct
@@ -34,10 +34,10 @@ func TestValidateStruct_withReader(t *testing.T) {
 
 	reader := bytes.NewReader(b)
 
-	validatedUser, err := ValidateStruct[User](reader)
+	validatedUser, valErr := ValidateStruct[User](reader)
 
-	if err != nil {
-		t.Fatalf("Expected validation to pass, got error: %v", err)
+	if valErr != nil {
+		t.Fatalf("Expected validation to pass, got error: %v", valErr[0].Messages[0])
 	}
 
 	if *validatedUser != user {
@@ -64,10 +64,10 @@ func TestValidateStruct_withReaderAndError(t *testing.T) {
 
 	reader := bytes.NewReader(b)
 
-	_, err = ValidateStruct[User](reader)
+	_, valErr := ValidateStruct[User](reader)
 
-	if err == nil {
-		t.Fatalf("Expected validation to fail, got error: %v", err)
+	if valErr == nil {
+		t.Fatalf("Expected validation to fail, got error: nil")
 	}
 }
 
@@ -179,8 +179,8 @@ type ValidateOnly struct {
 }
 
 // implement only CustomValidate interface
-func (nv *ValidateOnly) CustomValidate(data *ValidateOnly, sv *StructValidator[ValidateOnly]) error {
-	return errors.New("no validation rules defined")
+func (nv *ValidateOnly) CustomValidate(data *ValidateOnly, sv *StructValidator[ValidateOnly]) []ValidationError {
+	return []ValidationError{{Messages: []string{"no validation rules defined"}}}
 }
 
 func TestValidationStruct_OnlyValidateInterface(t *testing.T) {
@@ -189,14 +189,18 @@ func TestValidationStruct_OnlyValidateInterface(t *testing.T) {
 		Field2: 10,
 	}
 
-	validatedData, err := ValidateStruct[ValidateOnly](data)
+	validatedData, valErr := ValidateStruct[ValidateOnly](data)
 
-	if err == nil {
-		t.Fatalf("Expected  error for struct with only Validate interface, got %v", err)
+	if valErr == nil {
+		t.Fatalf("Expected error for struct with only Validate interface, got nil")
 	}
 
-	if err.Error() != "no validation rules defined" {
-		t.Fatalf("Expected error message 'no validation rules defined', got '%v'", err)
+	if valErr[0].Messages[0] != "no validation rules defined" {
+		t.Fatalf("Expected error message 'no validation rules defined', got '%v'", strings.Join(valErr[0].Messages, ", "))
+	}
+
+	if valErr[0].Field != "" {
+		t.Fatalf("Expected error field to be empty, got '%s'", valErr[0].Field)
 	}
 
 	if validatedData != nil {
@@ -216,9 +220,9 @@ func (cv *CustomValidationStruct) ValidationRules(sv *StructValidator[CustomVali
 	})
 }
 
-func (cv *CustomValidationStruct) CustomValidate(data *CustomValidationStruct, sv *StructValidator[CustomValidationStruct]) error {
+func (cv *CustomValidationStruct) CustomValidate(data *CustomValidationStruct, sv *StructValidator[CustomValidationStruct]) []ValidationError {
 	if data.Field2 < 0 {
-		return fmt.Errorf("Field2 must be non-negative")
+		return []ValidationError{{Messages: []string{"Field2 must be non-negative"}, Field: "Field2"}}
 	}
 	return sv.Validate(data)
 }
@@ -229,14 +233,50 @@ func TestValidationStruct_ValidateAndValidateInterface(t *testing.T) {
 		Field2: -5,
 	}
 
-	_, err := ValidateStruct[CustomValidationStruct](data)
+	_, valErr := ValidateStruct[CustomValidationStruct](data)
 
-	if err == nil {
+	if valErr == nil {
 		t.Fatalf("Expected error for custom validation failure, got nil")
 	}
 
 	expectedErrMsg := "Field2 must be non-negative"
-	if err.Error() != expectedErrMsg {
-		t.Fatalf("Expected error message '%s', got '%v'", expectedErrMsg, err)
+	if valErr[0].Messages[0] != expectedErrMsg {
+		t.Fatalf("Expected error message '%s', got '%v'", expectedErrMsg, valErr[0].Messages[0])
+	}
+
+	if valErr[0].Field != "Field2" {
+		t.Fatalf("Expected error field 'Field2', got '%s'", valErr[0].Field)
+	}
+}
+
+func TestMultiFieldValidationErrors(t *testing.T) {
+	user := User{
+		Name: "",
+		Age:  15,
+	}
+
+	_, valErr := ValidateStruct[User](user, config.SetReturnEarly(false))
+
+	if valErr == nil {
+		t.Fatalf("Expected validation to fail, got nil")
+	}
+
+	if len(valErr) != 2 {
+		t.Fatalf("Expected 2 validation errors, got %d", len(valErr))
+	}
+
+	expectedErrors := map[string]string{
+		"Name": "Name is required",
+		"Age":  "Age must be at least 18",
+	}
+
+	for _, err := range valErr {
+		expectedMsg, exists := expectedErrors[err.Field]
+		if !exists {
+			t.Fatalf("Unexpected validation error for field %s", err.Field)
+		}
+		if err.Messages[0] != expectedMsg {
+			t.Fatalf("Expected error message '%s' for field %s, got '%s'", expectedMsg, err.Field, err.Messages[0])
+		}
 	}
 }

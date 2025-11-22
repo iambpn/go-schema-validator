@@ -1,6 +1,7 @@
 package validator
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -45,7 +46,7 @@ func (v *Validator) compileRules() string {
 }
 
 // Method to validate a non-struct value
-func (v *Validator) Validate(value any) (err error) {
+func (v *Validator) ValidateCtx(ctx context.Context, value any) (err error) {
 	// recover from panics and return them as errors
 	defer func() {
 		if r := recover(); r != nil {
@@ -55,7 +56,7 @@ func (v *Validator) Validate(value any) (err error) {
 	}()
 
 	var errs pgValidator.ValidationErrors
-	err = v.pgValidate.Var(value, v.compileRules())
+	err = v.pgValidate.VarCtx(ctx, value, v.compileRules())
 
 	if err == nil {
 		return nil

@@ -16,8 +16,7 @@ type User struct {
 
 func TestField(t *testing.T) {
 	structVal := StructValidator[User]{
-		pgValidate: nil,
-		rules:      make(map[string]*Validator),
+		rules: make(map[string]*Validator),
 	}
 
 	nameField := "Name"
@@ -47,7 +46,7 @@ func TestField(t *testing.T) {
 func assertFirstErrorMessage[T any](val *T, sv *StructValidator[T], field string, errMsg string, t *testing.T) {
 	t.Helper()
 
-	err := sv.Validate(val)
+	err := sv.ValidateCtx(t.Context(), val)
 
 	if err == nil {
 		t.Fatalf("Expected validation to fail, got nil")
@@ -64,8 +63,7 @@ func assertFirstErrorMessage[T any](val *T, sv *StructValidator[T], field string
 
 func TestStructValidatorValidateChainedRules(t *testing.T) {
 	structVal := StructValidator[User]{
-		pgValidate: nil,
-		rules:      make(map[string]*Validator),
+		rules: make(map[string]*Validator),
 	}
 
 	nameField := "Name"
@@ -101,8 +99,7 @@ func TestStructValidatorValidateChainedRules(t *testing.T) {
 
 func TestStructValidatorValidate(t *testing.T) {
 	structVal := StructValidator[User]{
-		pgValidate: nil,
-		rules:      make(map[string]*Validator),
+		rules: make(map[string]*Validator),
 	}
 
 	nameField := "Name"
@@ -118,7 +115,7 @@ func TestStructValidatorValidate(t *testing.T) {
 		v.AddRule("min=18", ageGt18Message)
 	})
 
-	_, err := structVal.ValidateAny("")
+	_, err := structVal.ValidateAnyCtx(t.Context(), "")
 
 	if err == nil {
 		t.Errorf("Expected error on empty struct, got %v", err)
@@ -129,7 +126,7 @@ func TestStructValidatorValidate(t *testing.T) {
 		Age:  18,
 	}
 
-	err = structVal.Validate(&noUser)
+	err = structVal.ValidateCtx(t.Context(), &noUser)
 
 	if err != nil {
 		t.Errorf("Expected no error on valid struct, got %v", err)
@@ -162,8 +159,7 @@ func TestNewStruct(t *testing.T) {
 
 func TestValidateAnySuccess(t *testing.T) {
 	structVal := StructValidator[User]{
-		pgValidate: nil,
-		rules:      make(map[string]*Validator),
+		rules: make(map[string]*Validator),
 	}
 
 	noUser := User{
@@ -171,7 +167,7 @@ func TestValidateAnySuccess(t *testing.T) {
 		Age:  25,
 	}
 
-	ret, err := structVal.ValidateAny(noUser)
+	ret, err := structVal.ValidateAnyCtx(t.Context(), noUser)
 
 	if err != nil {
 		t.Fatalf("Expected no error on ValidateAny with correct type, got %v", err)
@@ -184,8 +180,7 @@ func TestValidateAnySuccess(t *testing.T) {
 
 func TestValidateStruct_NonStruct(t *testing.T) {
 	sv := StructValidator[any]{
-		pgValidate: nil,
-		rules:      make(map[string]*Validator),
+		rules: make(map[string]*Validator),
 	}
 
 	var anyValue any = "not a struct"
@@ -196,8 +191,7 @@ func TestValidateStruct_NonStruct(t *testing.T) {
 
 func TestValidateStruct_FieldDoesNotExist(t *testing.T) {
 	sv := StructValidator[User]{
-		pgValidate: nil,
-		rules:      make(map[string]*Validator),
+		rules: make(map[string]*Validator),
 	}
 
 	// add a rule for a non-existing field
@@ -216,8 +210,7 @@ func TestValidateStruct_FieldDoesNotExist(t *testing.T) {
 
 func TestValidateStruct_PointerInput(t *testing.T) {
 	sv := StructValidator[User]{
-		pgValidate: nil,
-		rules:      make(map[string]*Validator),
+		rules: make(map[string]*Validator),
 	}
 
 	sv.AddFieldRules("Name", func(v *Validator) {
@@ -230,7 +223,7 @@ func TestValidateStruct_PointerInput(t *testing.T) {
 	}
 
 	// pass pointer to struct
-	err := sv.Validate(&user)
+	err := sv.ValidateCtx(t.Context(), &user)
 
 	if err != nil {
 		t.Fatalf("Expected no error validating pointer to struct, got %v", err)
@@ -239,8 +232,7 @@ func TestValidateStruct_PointerInput(t *testing.T) {
 
 func TestValidateStruct_IoReaderInput(t *testing.T) {
 	sv := StructValidator[User]{
-		pgValidate: nil,
-		rules:      make(map[string]*Validator),
+		rules: make(map[string]*Validator),
 	}
 
 	sv.AddFieldRules("Name", func(v *Validator) {
@@ -260,7 +252,7 @@ func TestValidateStruct_IoReaderInput(t *testing.T) {
 
 	reader := strings.NewReader(string(bytes))
 
-	user, valErr := sv.ValidateIOReader(reader)
+	user, valErr := sv.ValidateIOReaderCtx(t.Context(), reader)
 
 	if valErr != nil {
 		t.Fatalf("Expected nil when validating io.Reader, got %v", valErr[0].Messages[0])
@@ -273,8 +265,7 @@ func TestValidateStruct_IoReaderInput(t *testing.T) {
 
 func TestValidateStructMultipleErrors(t *testing.T) {
 	sv := StructValidator[User]{
-		pgValidate: nil,
-		rules:      make(map[string]*Validator),
+		rules: make(map[string]*Validator),
 	}
 
 	sv.AddFieldRules("Name", func(v *Validator) {
@@ -290,7 +281,7 @@ func TestValidateStructMultipleErrors(t *testing.T) {
 		Age:  15,
 	}
 
-	err := sv.Validate(&user, config.SetReturnEarly(false))
+	err := sv.ValidateCtx(t.Context(), &user, config.SetReturnEarly(false))
 
 	if err == nil {
 		t.Fatalf("Expected validation to fail, got nil")

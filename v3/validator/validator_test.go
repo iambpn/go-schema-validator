@@ -49,7 +49,7 @@ func TestValidatorValidate(t *testing.T) {
 		t.Errorf("Expected schema to be created, got %v", schema)
 	}
 
-	err := schema.Validate("hello")
+	err := schema.ValidateCtx(t.Context(), "hello")
 
 	if err != nil {
 		t.Errorf("Expected no error on string, got %v", err)
@@ -58,7 +58,7 @@ func TestValidatorValidate(t *testing.T) {
 	const requiredMessage = "This field is required"
 	schema.AddRule("required", requiredMessage)
 
-	err = schema.Validate("")
+	err = schema.ValidateCtx(t.Context(), "")
 
 	if err == nil {
 		t.Errorf("Expected error on empty string, got %v", err)
@@ -70,13 +70,13 @@ func TestValidatorValidate(t *testing.T) {
 
 	schema.AddRule("min=3")
 
-	err = schema.Validate("hello")
+	err = schema.ValidateCtx(t.Context(), "hello")
 
 	if err != nil {
 		t.Errorf("Expected no error on string, got %v", err)
 	}
 
-	err = schema.Validate("he")
+	err = schema.ValidateCtx(t.Context(), "he")
 
 	if err == nil {
 		t.Errorf("Expected error on string, got %v", err)
@@ -92,7 +92,7 @@ func TestValidate_DefaultMessage(t *testing.T) {
 	schema := New()
 	schema.AddRule("min=3") // no custom message
 
-	err := schema.Validate("hi") // length 2 < 3
+	err := schema.ValidateCtx(t.Context(), "hi") // length 2 < 3
 
 	if err == nil {
 		t.Fatalf("Expected error for value shorter than min, got nil")
@@ -114,7 +114,7 @@ func TestValidate_PanicRecovered(t *testing.T) {
 	// simulate a panic by nil-ing the internal validator (causes a nil function call panic)
 	v.pgValidate = nil
 
-	err := v.Validate("anything")
+	err := v.ValidateCtx(t.Context(), "anything")
 
 	if err == nil {
 		t.Fatalf("Expected error when underlying validator panics, got nil")

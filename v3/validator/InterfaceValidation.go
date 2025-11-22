@@ -1,6 +1,7 @@
 package validator
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,15 +20,15 @@ type ValidationRules[T any] interface {
 // T is the struct type
 // Implement the CustomValidate method to add custom validation logic
 type CustomValidate[T any] interface {
-	CustomValidate(data *T, sv *StructValidator[T]) []ValidationError
+	CustomValidate(ctx context.Context, data *T, sv *StructValidator[T]) []ValidationError
 }
 
-// ValidateStruct Method validates the data to generic struct that had
+// ValidateStructCtx Method validates the data to generic struct that had
 // implemented ValidationRules or CustomValidate interface.
 //
 // data can be either struct or io.Reader
 // Returns pointer to validated struct and error if validation fails
-func ValidateStruct[S any](data any, configs ...config.Config) (*S, []ValidationError) {
+func ValidateStructCtx[S any](ctx context.Context, data any, configs ...config.Config) (*S, []ValidationError) {
 	val := new(S)
 
 	// check if data is reader
@@ -62,10 +63,10 @@ func ValidateStruct[S any](data any, configs ...config.Config) (*S, []Validation
 		var valErrs []ValidationError = nil
 		if validateInf, ok := any(val).(CustomValidate[S]); ok {
 			// user specified validation
-			valErrs = validateInf.CustomValidate(val, sv)
+			valErrs = validateInf.CustomValidate(ctx, val, sv)
 		} else {
 			// default struct validation
-			valErrs = sv.Validate(val, configs...)
+			valErrs = sv.ValidateCtx(ctx, val, configs...)
 		}
 
 		if valErrs != nil {
@@ -80,7 +81,7 @@ func ValidateStruct[S any](data any, configs ...config.Config) (*S, []Validation
 	if validateInf, ok := any(val).(CustomValidate[S]); ok {
 		// user specified validation without validation rules
 		sv := NewStruct[S]()
-		err := validateInf.CustomValidate(val, sv)
+		err := validateInf.CustomValidate(ctx, val, sv)
 
 		if err != nil {
 			// return validation error

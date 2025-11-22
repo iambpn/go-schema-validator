@@ -1,12 +1,12 @@
 package validator
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"reflect"
 
-	pgValidator "github.com/go-playground/validator/v10"
 	"github.com/iambpn/go-schema-validator/v3/internal/config"
 )
 
@@ -16,15 +16,13 @@ type ValidationError struct {
 }
 
 type StructValidator[T any] struct {
-	pgValidate *pgValidator.Validate
-	rules      map[string]*Validator
+	rules map[string]*Validator
 }
 
 // Method to create a struct validation
 func NewStruct[T any]() *StructValidator[T] {
 	return &StructValidator[T]{
-		pgValidate: pgValidator.New(),
-		rules:      make(map[string]*Validator),
+		rules: make(map[string]*Validator),
 	}
 }
 
@@ -40,7 +38,7 @@ func (sv *StructValidator[T]) AddFieldRules(name string, addRules func(*Validato
 }
 
 // Method to validate a struct
-func (sv *StructValidator[T]) Validate(structVal *T, configs ...config.Config) []ValidationError {
+func (sv *StructValidator[T]) ValidateCtx(ctx context.Context, structVal *T, configs ...config.Config) []ValidationError {
 	mergedConfig := config.MergeConfigs(configs...)
 
 	val := reflect.ValueOf(structVal)
@@ -76,7 +74,7 @@ func (sv *StructValidator[T]) Validate(structVal *T, configs ...config.Config) [
 			}
 		}
 
-		err := validator.Validate(field.Interface())
+		err := validator.ValidateCtx(ctx, field.Interface())
 		if err != nil {
 			if mergedConfig[config.ReturnEarly] {
 				return []ValidationError{{
@@ -109,7 +107,7 @@ func (sv *StructValidator[T]) Validate(structVal *T, configs ...config.Config) [
 }
 
 // Method to validate a struct from any type
-func (sv *StructValidator[T]) ValidateAny(structKind any) (*T, []ValidationError) {
+func (sv *StructValidator[T]) ValidateAnyCtx(ctx context.Context, structKind any) (*T, []ValidationError) {
 	structVal, ok := structKind.(T)
 
 	if !ok {
@@ -118,7 +116,7 @@ func (sv *StructValidator[T]) ValidateAny(structKind any) (*T, []ValidationError
 		}}
 	}
 
-	err := sv.Validate(&structVal)
+	err := sv.ValidateCtx(ctx, &structVal)
 
 	return &structVal, err
 }
@@ -126,7 +124,7 @@ func (sv *StructValidator[T]) ValidateAny(structKind any) (*T, []ValidationError
 // Method to validate a struct from an io.Reader
 // To prevent memory leak make sure to close the reader after calling this method
 // e.g: defer reader.Close()
-func (sv *StructValidator[T]) ValidateIOReader(reader io.Reader) (*T, []ValidationError) {
+func (sv *StructValidator[T]) ValidateIOReaderCtx(ctx context.Context, reader io.Reader) (*T, []ValidationError) {
 	var structVal T
 
 	err := json.NewDecoder(reader).Decode(&structVal)
@@ -136,7 +134,7 @@ func (sv *StructValidator[T]) ValidateIOReader(reader io.Reader) (*T, []Validati
 		}}
 	}
 
-	valErr := sv.Validate(&structVal)
+	valErr := sv.ValidateCtx(ctx, &structVal)
 	if valErr != nil {
 		return nil, valErr
 	}

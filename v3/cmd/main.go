@@ -1,19 +1,22 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/iambpn/go-schema-validator/v3/validator"
 )
 
 func main() {
+	ctx := context.Background()
+
 	// Simple field validation
 	customSchema := validator.New().
 		AddRule("min=3", "Must be at least 3 characters").
 		AddRule("max=10", "Must be at most 10 characters").
 		AddRule("required", "This field is required")
 
-	err := customSchema.Validate("he")
+	err := customSchema.ValidateCtx(ctx, "he")
 	if err != nil {
 		fmt.Println("Validation error:", err)
 	}
@@ -23,7 +26,7 @@ func main() {
 		Email("Must be a valid email").
 		Required("Email is required")
 
-	err = emailSchema.Validate("not-an-email")
+	err = emailSchema.ValidateCtx(ctx, "not-an-email")
 	if err != nil {
 		fmt.Println("Email validation error:", err)
 	}
@@ -57,7 +60,7 @@ func main() {
 		Age:   15,
 	}
 
-	valErr := userSchema.Validate(&user)
+	valErr := userSchema.ValidateCtx(ctx, &user)
 	if valErr != nil {
 		fmt.Println("User validation error:", valErr[0].Messages[0])
 	}

@@ -2,6 +2,7 @@ package validator
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -34,7 +35,7 @@ func TestValidateStruct_withReader(t *testing.T) {
 
 	reader := bytes.NewReader(b)
 
-	validatedUser, valErr := ValidateStruct[User](reader)
+	validatedUser, valErr := ValidateStructCtx[User](t.Context(), reader)
 
 	if valErr != nil {
 		t.Fatalf("Expected validation to pass, got error: %v", valErr[0].Messages[0])
@@ -64,7 +65,7 @@ func TestValidateStruct_withReaderAndError(t *testing.T) {
 
 	reader := bytes.NewReader(b)
 
-	_, valErr := ValidateStruct[User](reader)
+	_, valErr := ValidateStructCtx[User](t.Context(), reader)
 
 	if valErr == nil {
 		t.Fatalf("Expected validation to fail, got error: nil")
@@ -77,7 +78,7 @@ func TestValidateStruct_withStructInput(t *testing.T) {
 		Age:  30,
 	}
 
-	validatedUser, err := ValidateStruct[User](user)
+	validatedUser, err := ValidateStructCtx[User](t.Context(), user)
 
 	if err != nil {
 		t.Fatalf("Expected validation to pass, got error: %v", err)
@@ -94,7 +95,7 @@ func TestValidateStruct_withStructInputAndError(t *testing.T) {
 		DOB:  "2030/12/12",
 	}
 
-	_, err := ValidateStruct[User](user)
+	_, err := ValidateStructCtx[User](t.Context(), user)
 
 	if err == nil {
 		t.Fatalf("Expected validation to fail, got error: %v", err)
@@ -106,7 +107,7 @@ func TestValidateStruct_withInvalidTypeInReader(t *testing.T) {
 
 	reader := strings.NewReader(invalidJSON)
 
-	_, err := ValidateStruct[User](reader)
+	_, err := ValidateStructCtx[User](t.Context(), reader)
 
 	if err == nil {
 		t.Fatalf("Expected validation to fail for invalid type in JSON, got nil error")
@@ -118,7 +119,7 @@ func TestValidateStruct_withInvalidJSON(t *testing.T) {
 
 	reader := strings.NewReader(invalidJSON)
 
-	_, err := ValidateStruct[User](reader)
+	_, err := ValidateStructCtx[User](t.Context(), reader)
 
 	if err == nil {
 		t.Fatalf("Expected validation to fail for invalid JSON, got nil error")
@@ -126,7 +127,7 @@ func TestValidateStruct_withInvalidJSON(t *testing.T) {
 }
 
 func TestValidateStruct_withInvalidType(t *testing.T) {
-	_, err := ValidateStruct[User](12345)
+	_, err := ValidateStructCtx[User](t.Context(), 12345)
 
 	if err == nil {
 		t.Fatalf("Expected validation to fail for invalid type, got nil error")
@@ -134,7 +135,7 @@ func TestValidateStruct_withInvalidType(t *testing.T) {
 }
 
 func TestValidateStruct_withNilReader(t *testing.T) {
-	_, err := ValidateStruct[User](nil)
+	_, err := ValidateStructCtx[User](t.Context(), nil)
 
 	if err == nil {
 		t.Fatalf("Expected validation to fail for nil reader, got nil error")
@@ -144,7 +145,7 @@ func TestValidateStruct_withNilReader(t *testing.T) {
 func TestValidateStruct_withNilStruct(t *testing.T) {
 	var user *User = nil
 
-	_, err := ValidateStruct[User](user)
+	_, err := ValidateStructCtx[User](t.Context(), user)
 
 	if err == nil {
 		t.Fatalf("Expected validation to fail for nil struct, got nil error")
@@ -162,7 +163,7 @@ func TestValidationStruct_NoValidationRuleAndValidate(t *testing.T) {
 		Field2: 10,
 	}
 
-	validatedData, err := ValidateStruct[NoValidation](data)
+	validatedData, err := ValidateStructCtx[NoValidation](t.Context(), data)
 
 	if err == nil {
 		t.Fatalf("Expected  error for struct without ValidationRule, got %v", err)
@@ -179,7 +180,7 @@ type ValidateOnly struct {
 }
 
 // implement only CustomValidate interface
-func (nv *ValidateOnly) CustomValidate(data *ValidateOnly, sv *StructValidator[ValidateOnly]) []ValidationError {
+func (nv *ValidateOnly) CustomValidate(ctx context.Context, data *ValidateOnly, sv *StructValidator[ValidateOnly]) []ValidationError {
 	return []ValidationError{{Messages: []string{"no validation rules defined"}}}
 }
 
@@ -189,7 +190,7 @@ func TestValidationStruct_OnlyValidateInterface(t *testing.T) {
 		Field2: 10,
 	}
 
-	validatedData, valErr := ValidateStruct[ValidateOnly](data)
+	validatedData, valErr := ValidateStructCtx[ValidateOnly](t.Context(), data)
 
 	if valErr == nil {
 		t.Fatalf("Expected error for struct with only Validate interface, got nil")
@@ -220,11 +221,11 @@ func (cv *CustomValidationStruct) ValidationRules(sv *StructValidator[CustomVali
 	})
 }
 
-func (cv *CustomValidationStruct) CustomValidate(data *CustomValidationStruct, sv *StructValidator[CustomValidationStruct]) []ValidationError {
+func (cv *CustomValidationStruct) CustomValidate(ctx context.Context, data *CustomValidationStruct, sv *StructValidator[CustomValidationStruct]) []ValidationError {
 	if data.Field2 < 0 {
 		return []ValidationError{{Messages: []string{"Field2 must be non-negative"}, Field: "Field2"}}
 	}
-	return sv.Validate(data)
+	return sv.ValidateCtx(ctx, data)
 }
 
 func TestValidationStruct_ValidateAndValidateInterface(t *testing.T) {
@@ -233,7 +234,7 @@ func TestValidationStruct_ValidateAndValidateInterface(t *testing.T) {
 		Field2: -5,
 	}
 
-	_, valErr := ValidateStruct[CustomValidationStruct](data)
+	_, valErr := ValidateStructCtx[CustomValidationStruct](t.Context(), data)
 
 	if valErr == nil {
 		t.Fatalf("Expected error for custom validation failure, got nil")
@@ -255,7 +256,7 @@ func TestMultiFieldValidationErrors(t *testing.T) {
 		Age:  15,
 	}
 
-	_, valErr := ValidateStruct[User](user, config.SetReturnEarly(false))
+	_, valErr := ValidateStructCtx[User](t.Context(), user, config.SetReturnEarly(false))
 
 	if valErr == nil {
 		t.Fatalf("Expected validation to fail, got nil")

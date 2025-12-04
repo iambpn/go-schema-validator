@@ -180,8 +180,8 @@ type ValidateOnly struct {
 }
 
 // implement only CustomValidate interface
-func (nv *ValidateOnly) CustomValidate(ctx context.Context, data *ValidateOnly, sv *StructValidator[ValidateOnly]) []ValidationError {
-	return []ValidationError{{Messages: []string{"no validation rules defined"}}}
+func (nv *ValidateOnly) CustomValidate(ctx context.Context, data *ValidateOnly, sv *StructValidator[ValidateOnly]) ValidationErrors {
+	return ValidationErrors{{Messages: []string{"no validation rules defined"}}}
 }
 
 func TestValidationStruct_OnlyValidateInterface(t *testing.T) {
@@ -221,9 +221,9 @@ func (cv *CustomValidationStruct) ValidationRules(sv *StructValidator[CustomVali
 	})
 }
 
-func (cv *CustomValidationStruct) CustomValidate(ctx context.Context, data *CustomValidationStruct, sv *StructValidator[CustomValidationStruct]) []ValidationError {
+func (cv *CustomValidationStruct) CustomValidate(ctx context.Context, data *CustomValidationStruct, sv *StructValidator[CustomValidationStruct]) ValidationErrors {
 	if data.Field2 < 0 {
-		return []ValidationError{{Messages: []string{"Field2 must be non-negative"}, Field: "Field2"}}
+		return ValidationErrors{{Messages: []string{"Field2 must be non-negative"}, Field: "Field2"}}
 	}
 	return sv.ValidateCtx(ctx, data)
 }

@@ -10,9 +10,22 @@ import (
 	"github.com/iambpn/go-schema-validator/v3/internal/config"
 )
 
+// ValidationError represents a validation error for a specific field
 type ValidationError struct {
 	Field    string   `json:"field"`
 	Messages []string `json:"messages"`
+}
+
+// ValidationErrors is type alias to slice of ValidationError
+type ValidationErrors []ValidationError
+
+// Method to convert ValidationErrors to a map
+func (ve ValidationErrors) ToMap() map[string][]string {
+	result := make(map[string][]string)
+	for _, err := range ve {
+		result[err.Field] = err.Messages
+	}
+	return result
 }
 
 type StructValidator[T any] struct {
@@ -38,7 +51,7 @@ func (sv *StructValidator[T]) AddFieldRules(name string, addRules func(*Validato
 }
 
 // Method to validate a struct
-func (sv *StructValidator[T]) ValidateCtx(ctx context.Context, structVal *T, configs ...config.Config) []ValidationError {
+func (sv *StructValidator[T]) ValidateCtx(ctx context.Context, structVal *T, configs ...config.Config) ValidationErrors {
 	mergedConfig := config.MergeConfigs(configs...)
 
 	val := reflect.ValueOf(structVal)
@@ -48,7 +61,7 @@ func (sv *StructValidator[T]) ValidateCtx(ctx context.Context, structVal *T, con
 	}
 
 	if val.Kind() != reflect.Struct {
-		valErrs := []ValidationError{}
+		valErrs := ValidationErrors{}
 		valErrs = append(valErrs, ValidationError{Messages: []string{"argument value must be a struct"}})
 		return valErrs
 	}
@@ -60,7 +73,7 @@ func (sv *StructValidator[T]) ValidateCtx(ctx context.Context, structVal *T, con
 		// check if value is exist and is usable
 		if !field.IsValid() {
 			if mergedConfig[config.ReturnEarly] {
-				return []ValidationError{{
+				return ValidationErrors{{
 					Field:    fieldName,
 					Messages: []string{fmt.Sprintf("field %s does not exist", fieldName)},
 				}}
@@ -77,7 +90,7 @@ func (sv *StructValidator[T]) ValidateCtx(ctx context.Context, structVal *T, con
 		err := validator.ValidateCtx(ctx, field.Interface())
 		if err != nil {
 			if mergedConfig[config.ReturnEarly] {
-				return []ValidationError{{
+				return ValidationErrors{{
 					Field:    fieldName,
 					Messages: []string{fmt.Sprintf("%s", err)},
 				}}
@@ -93,7 +106,7 @@ func (sv *StructValidator[T]) ValidateCtx(ctx context.Context, structVal *T, con
 	}
 
 	if len(valErrMap) > 0 {
-		valErrs := []ValidationError{}
+		valErrs := ValidationErrors{}
 		for field, messages := range valErrMap {
 			valErrs = append(valErrs, ValidationError{
 				Field:    field,
@@ -107,11 +120,11 @@ func (sv *StructValidator[T]) ValidateCtx(ctx context.Context, structVal *T, con
 }
 
 // Method to validate a struct from any type
-func (sv *StructValidator[T]) ValidateAnyCtx(ctx context.Context, structKind any) (*T, []ValidationError) {
+func (sv *StructValidator[T]) ValidateAnyCtx(ctx context.Context, structKind any) (*T, ValidationErrors) {
 	structVal, ok := structKind.(T)
 
 	if !ok {
-		return nil, []ValidationError{{
+		return nil, ValidationErrors{{
 			Messages: []string{"argument value type is not valid"},
 		}}
 	}
@@ -124,12 +137,12 @@ func (sv *StructValidator[T]) ValidateAnyCtx(ctx context.Context, structKind any
 // Method to validate a struct from an io.Reader
 // To prevent memory leak make sure to close the reader after calling this method
 // e.g: defer reader.Close()
-func (sv *StructValidator[T]) ValidateIOReaderCtx(ctx context.Context, reader io.Reader) (*T, []ValidationError) {
+func (sv *StructValidator[T]) ValidateIOReaderCtx(ctx context.Context, reader io.Reader) (*T, ValidationErrors) {
 	var structVal T
 
 	err := json.NewDecoder(reader).Decode(&structVal)
 	if err != nil {
-		return nil, []ValidationError{{
+		return nil, ValidationErrors{{
 			Messages: []string{fmt.Sprintf("failed to decode struct from reader: %s", err)},
 		}}
 	}

@@ -245,7 +245,7 @@ func main() {
 - `validator.ValidationRules[T]`: interface for declaring struct rules
   - `ValidationRules(sv *StructValidator[T])`
 - `validator.CustomValidate[T]`: interface for supplying custom or cross-field validation logic
-  - `CustomValidate(ctx context.Context, data *T, sv *StructValidator[T]) []ValidationError`
+  - `CustomValidate(ctx context.Context, data *T, sv *StructValidator[T]) ValidationErrors`
 
 ### Types
 

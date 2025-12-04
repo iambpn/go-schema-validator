@@ -306,3 +306,42 @@ func TestValidateStructMultipleErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateValidationErrorsToMap(t *testing.T) {
+	sv := StructValidator[User]{
+		rules: make(map[string]*Validator),
+	}
+
+	sv.AddFieldRules("Name", func(v *Validator) {
+		v.AddRule("required", "Name is required")
+		v.AddRule("min=3", "Name must be at least 3 characters")
+	})
+	sv.AddFieldRules("Age", func(v *Validator) {
+		v.AddRule("min=18", "Age must be at least 18")
+	})
+
+	user := User{
+		Name: "Al",
+		Age:  15,
+	}
+
+	err := sv.ValidateCtx(t.Context(), &user, config.SetReturnEarly(false))
+
+	if err == nil {
+		t.Fatalf("Expected validation to fail, got nil")
+	}
+
+	mapErr := err.ToMap()
+
+	if len(mapErr) != 2 {
+		t.Fatalf("Expected 2 fields in error map, got %d", len(mapErr))
+	}
+
+	if len(mapErr["Name"]) != 1 || mapErr["Name"][0] != "Name must be at least 3 characters" {
+		t.Fatalf("Unexpected error messages for Name field: %v", mapErr["Name"])
+	}
+
+	if len(mapErr["Age"]) != 1 || mapErr["Age"][0] != "Age must be at least 18" {
+		t.Fatalf("Unexpected error messages for Age field: %v", mapErr["Age"])
+	}
+}

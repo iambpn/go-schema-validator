@@ -14,39 +14,40 @@ type validationRule struct {
 	message string
 }
 
-type Validator struct {
-	pgValidate *pgValidator.Validate
-	rules      []validationRule
+type FieldValidator struct {
+	fieldRules []validationRule
 }
 
-func New() *Validator {
-	return &Validator{
-		pgValidate: pgValidator.New(),
-		rules:      []validationRule{},
+func New() *FieldValidator {
+	return &FieldValidator{
+		fieldRules: []validationRule{},
 	}
 }
 
-// Generic method for adding validation rules
-func (v *Validator) AddRule(rule string, message ...string) *Validator {
+// Generic method for adding validation rules.
+//
+// Visit https://github.com/go-playground/validator to know more about available rules
+func (v *FieldValidator) AddRule(rule string, message ...string) *FieldValidator {
 	msg := ""
 	if len(message) > 0 {
 		msg = message[0]
 	}
-	v.rules = append(v.rules, validationRule{rule: rule, message: msg})
+	v.fieldRules = append(v.fieldRules, validationRule{rule: rule, message: msg})
 	return v
 }
 
 // Method to compile rules into a single string
-func (v *Validator) compileRules() string {
+func (v *FieldValidator) compileRules() string {
 	var rules []string
-	for _, rule := range v.rules {
+	for _, rule := range v.fieldRules {
 		rules = append(rules, rule.rule)
 	}
 	return strings.Join(rules, ",")
 }
 
-// Method to validate a non-struct value
-func (v *Validator) ValidateCtx(ctx context.Context, value any) (err error) {
+// ValidateFieldCtxWithValidator Method to validate a non-struct value with a provided validator instance
+// This method recovers from panics and returns them as errors
+func (v *FieldValidator) ValidateFieldCtx(ctx context.Context, pgVal *pgValidator.Validate, value any) (err error) {
 	// recover from panics and return them as errors
 	defer func() {
 		if r := recover(); r != nil {
@@ -56,7 +57,7 @@ func (v *Validator) ValidateCtx(ctx context.Context, value any) (err error) {
 	}()
 
 	var errs pgValidator.ValidationErrors
-	err = v.pgValidate.VarCtx(ctx, value, v.compileRules())
+	err = pgVal.VarCtx(ctx, value, v.compileRules())
 
 	if err == nil {
 		return nil
@@ -67,7 +68,7 @@ func (v *Validator) ValidateCtx(ctx context.Context, value any) (err error) {
 	}
 
 	for _, e := range errs {
-		for _, rule := range v.rules {
+		for _, rule := range v.fieldRules {
 			if strings.HasPrefix(rule.rule, e.Tag()) {
 				if rule.message != "" {
 					return errors.New(rule.message)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	pgValidator "github.com/go-playground/validator/v10"
 	"github.com/iambpn/go-schema-validator/v3/internal/config"
 )
 
@@ -20,7 +21,7 @@ type ValidationRules[T any] interface {
 // T is the struct type
 // Implement the CustomValidate method to add custom validation logic
 type CustomValidate[T any] interface {
-	CustomValidate(ctx context.Context, data *T, sv *StructValidator[T]) ValidationErrors
+	CustomValidate(ctx context.Context, v *pgValidator.Validate, data *T, sv *StructValidator[T]) ValidationErrors
 }
 
 // ValidateStructCtx Method validates the data to generic struct that had
@@ -28,7 +29,7 @@ type CustomValidate[T any] interface {
 //
 // data can be either struct or io.Reader
 // Returns pointer to validated struct and error if validation fails
-func ValidateStructCtx[S any](ctx context.Context, data any, configs ...config.Config) (*S, ValidationErrors) {
+func ValidateStructCtx[S any](ctx context.Context, v *pgValidator.Validate, data any, configs ...config.Config) (*S, ValidationErrors) {
 	val := new(S)
 
 	// check if data is reader
@@ -36,21 +37,23 @@ func ValidateStructCtx[S any](ctx context.Context, data any, configs ...config.C
 		err := json.NewDecoder(reader).Decode(val)
 
 		if err != nil {
-			valErrs := ValidationErrors{}
-			valErr := ValidationError{
-				Messages: []string{fmt.Sprintf("failed to decode '%T' struct from provided reader: %s", val, err)},
+			valErrs := ValidationErrors{
+				"error": ValidationError{
+					Field:    "error",
+					Messages: []string{fmt.Sprintf("failed to decode '%T' struct from provided reader: %s", val, err)},
+				},
 			}
-			valErrs = append(valErrs, valErr)
 			return nil, valErrs
 		}
 	} else if structVal, ok := data.(S); ok {
 		val = &structVal
 	} else {
-		valErrs := ValidationErrors{}
-		valErr := ValidationError{
-			Messages: []string{fmt.Sprintf("data must be either io.Reader or %T struct", *val)},
+		valErrs := ValidationErrors{
+			"error": ValidationError{
+				Field:    "error",
+				Messages: []string{fmt.Sprintf("data must be either io.Reader or %T struct", *val)},
+			},
 		}
-		valErrs = append(valErrs, valErr)
 
 		return nil, valErrs
 	}
@@ -63,10 +66,10 @@ func ValidateStructCtx[S any](ctx context.Context, data any, configs ...config.C
 		var valErrs ValidationErrors = nil
 		if validateInf, ok := any(val).(CustomValidate[S]); ok {
 			// user specified validation
-			valErrs = validateInf.CustomValidate(ctx, val, sv)
+			valErrs = validateInf.CustomValidate(ctx, v, val, sv)
 		} else {
 			// default struct validation
-			valErrs = sv.ValidateCtx(ctx, val, configs...)
+			valErrs = sv.ValidateCtx(ctx, v, val, configs...)
 		}
 
 		if valErrs != nil {
@@ -81,20 +84,22 @@ func ValidateStructCtx[S any](ctx context.Context, data any, configs ...config.C
 	if validateInf, ok := any(val).(CustomValidate[S]); ok {
 		// user specified validation without validation rules
 		sv := NewStruct[S]()
-		err := validateInf.CustomValidate(ctx, val, sv)
+		valErrs := validateInf.CustomValidate(ctx, v, val, sv)
 
-		if err != nil {
+		if valErrs != nil {
 			// return validation error
-			return nil, err
+			return nil, valErrs
 		}
 
 		return val, nil
 	}
 
-	valErrs := ValidationErrors{}
-	valErr := ValidationError{
-		Messages: []string{fmt.Sprintf("struct '%T' does not implement neither ValidationRules[%T] nor CustomValidate[%T] interface from (Go-Schema-Validator)", val, *val, *val)},
+	valErrs := ValidationErrors{
+		"error": ValidationError{
+			Field:    "error",
+			Messages: []string{fmt.Sprintf("struct '%T' does not implement neither ValidationRules[%T] nor CustomValidate[%T] interface from (Go-Schema-Validator)", val, *val, *val)},
+		},
 	}
-	valErrs = append(valErrs, valErr)
+
 	return nil, valErrs
 }

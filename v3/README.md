@@ -1,58 +1,35 @@
-# Go Schema Validator v3
+# go-schema-validator v3
 
-Lightweight, context-aware, chainable schema validation utilities built on top of `go-playground/validator` for simple values and generic structs.
+Lightweight, context-aware schema validation for Go built on top of `github.com/go-playground/validator/v10`. Define rules fluently, attach human-friendly messages, and reuse them across values, structs, and streamed JSON with Go generics.
 
 ## Introduction
 
-Go Schema Validator v3 wraps `github.com/go-playground/validator/v10` with a fluent API and Go generics so you can describe validation logic once and reuse it across values, structs, and even streamed input. It ships with helper shortcuts for common rules, structured validation builders, context support, configurable error handling, and interfaces for plugging in custom logic.
+This library wraps go-playground/validator with a small, fluent API. You describe validation once and apply it to single values, structs, or `io.Reader` inputs. Rules support custom messages, execution is context-aware, and behavior is configurable (return early or collect all errors). Interfaces are available when you prefer declarative, reusable validation logic.
 
 ## Features
 
-- Fluent rule builder with human-friendly error messages
-- Context-aware validation with `context.Context` support
-- Type-safe struct validation using `StructValidator[T]`
-- Structured error reporting with field-level validation errors
-- Configurable validation behavior (e.g., return early on first error)
-- Works with native values, structs, and JSON `io.Reader` inputs
-- Simple helpers for common rules like `Required`, `Email`, `Min`, `Max`, and `Int`
-- Optional interfaces for declarative and custom validation workflows
+- Fluent, chainable rule builder with custom messages
+- Context-aware validation for values, structs, and JSON streams
+- Go generics for type-safe struct validation (`StructValidator[T]`)
+- Helper methods for common rules (`Required`, `Email`, `Min`, `Max`, `Length`, `Optional`, `URL`, `UUID`, `IsNumber`, `IsBoolean`)
+- Configurable error aggregation (stop on first error or collect all)
+- Structured error reporting with `ValidationError`/`ValidationErrors`
+- Interfaces for declarative rules and custom validation hooks
+- Panic-safe single-value validation (recovers and surfaces errors)
 
 ## Installation
+
+Prerequisites: Go 1.25 or newer.
 
 ```bash
 go get github.com/iambpn/go-schema-validator/v3
 ```
 
-The module targets Go 1.25 or newer as declared in `go.mod`.
+The package expects an instance of `*validator.Validate` from `github.com/go-playground/validator/v10` (aliased as `pgValidator` in examples below); create and reuse it in your application.
 
 ## Usage
 
-### Validate a single value
-
-```go
-package main
-
-import (
-	"context"
-
-	"github.com/iambpn/go-schema-validator/v3/validator"
-)
-
-func main() {
-	ctx := context.Background()
-
-	err := validator.New().
-		Required("Name is required").
-		Min(3, "Name must have at least 3 characters").
-		ValidateCtx(ctx, "Jo")
-
-	if err != nil {
-		panic(err)
-	}
-}
-```
-
-### Validate a struct with field-specific rules
+### 1) Validate a single value
 
 ```go
 package main
@@ -61,6 +38,36 @@ import (
 	"context"
 	"fmt"
 
+	pgValidator "github.com/go-playground/validator/v10"
+	"github.com/iambpn/go-schema-validator/v3/validator"
+)
+
+func main() {
+	ctx := context.Background()
+	v := pgValidator.New()
+
+	err := validator.New().
+		Required("Name is required").
+		Min(3, "Name must have at least 3 characters").
+		ValidateFieldCtx(ctx, v, "Jo")
+
+	if err != nil {
+		fmt.Println("validation failed:", err)
+	}
+}
+```
+
+### 2) Validate a struct with field-specific rules
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+
+	pgValidator "github.com/go-playground/validator/v10"
+	"github.com/iambpn/go-schema-validator/v3/internal/config"
 	"github.com/iambpn/go-schema-validator/v3/validator"
 )
 
@@ -72,31 +79,33 @@ type User struct {
 
 func main() {
 	ctx := context.Background()
+	v := pgValidator.New()
 
 	userValidator := validator.NewStruct[User]().
-		AddFieldRules("Name", func(v *validator.Validator) {
-			v.Required("Name is required").
-				Min(2, "Name must be at least 2 characters")
+		AddFieldRules("Name", func(fv *validator.FieldValidator) {
+			fv.Required("Name is required").Min(2, "Name must be at least 2 characters")
 		}).
-		AddFieldRules("Email", func(v *validator.Validator) {
-			v.Email("Email must be valid")
+		AddFieldRules("Email", func(fv *validator.FieldValidator) {
+			fv.Required("Email is required").Email("Invalid email address")
 		}).
-		AddFieldRules("Age", func(v *validator.Validator) {
-			v.Int("Age must be a number").
-				Min(18, "Age must be 18 or older")
+		AddFieldRules("Age", func(fv *validator.FieldValidator) {
+			fv.IsNumber("Age must be numeric").Min(18, "Age must be 18 or older")
 		})
 
-	candidate := User{Name: "Jane", Email: "jane@example.com", Age: 32}
+	candidate := User{Name: "Al", Email: "bad", Age: 15}
 
-	if valErrs := userValidator.ValidateCtx(ctx, &candidate); valErrs != nil {
-		for _, valErr := range valErrs {
-			fmt.Printf("Field '%s': %v\n", valErr.Field, valErr.Messages)
+	// Collect all errors instead of returning after the first
+	if errs := userValidator.ValidateCtx(ctx, v, &candidate, config.SetReturnEarly(false)); errs != nil {
+		for field, err := range errs.ToErrorMap() {
+			fmt.Printf("%s: %v\n", field, err)
 		}
 	}
 }
 ```
 
-### Use interfaces for reusable validation logic
+### 3) Declarative rules via interfaces
+
+Implement `ValidationRules[T]` (and optionally `CustomValidate[T]`) to keep validation next to your structs.
 
 ```go
 package main
@@ -104,6 +113,7 @@ package main
 import (
 	"context"
 
+	pgValidator "github.com/go-playground/validator/v10"
 	"github.com/iambpn/go-schema-validator/v3/validator"
 )
 
@@ -113,32 +123,34 @@ type Payload struct {
 }
 
 func (p *Payload) ValidationRules(sv *validator.StructValidator[Payload]) {
-	sv.AddFieldRules("Name", func(v *validator.Validator) {
-		v.Required("Name is required")
+	sv.AddFieldRules("Name", func(fv *validator.FieldValidator) {
+		fv.Required("Name is required")
 	})
-	sv.AddFieldRules("Age", func(v *validator.Validator) {
-		v.Min(18, "Age must be at least 18")
+	sv.AddFieldRules("Age", func(fv *validator.FieldValidator) {
+		fv.Min(18, "Age must be 18 or older")
 	})
 }
 
-// Optional: add cross-field or complex checks
-func (p *Payload) CustomValidate(ctx context.Context, data *Payload, sv *validator.StructValidator[Payload]) []validator.ValidationError {
-	return sv.ValidateCtx(ctx, data)
+// Optional custom hook for cross-field checks or alternative logic
+func (p *Payload) CustomValidate(ctx context.Context, v *pgValidator.Validate, data *Payload, sv *validator.StructValidator[Payload]) validator.ValidationErrors {
+	return sv.ValidateCtx(ctx, v, data) // reuse the declared rules
 }
 
 func main() {
 	ctx := context.Background()
+	v := pgValidator.New()
 
-	validated, valErrs := validator.ValidateStructCtx[Payload](ctx, Payload{Name: "Admin", Age: 20})
-	if valErrs != nil {
-		panic(valErrs[0].Messages[0])
+	validated, errs := validator.ValidateStructCtx[Payload](ctx, v, Payload{Name: "Ada", Age: 17})
+	_ = validated
+
+	if errs != nil {
+		// errs is a map[string]ValidationError
+		panic(errs.ToErrorMap())
 	}
-
-	_ = validated // ready-to-use struct
 }
 ```
 
-### Validate streamed JSON
+### 4) Validate streamed JSON from an `io.Reader`
 
 ```go
 package main
@@ -147,6 +159,7 @@ import (
 	"context"
 	"strings"
 
+	pgValidator "github.com/go-playground/validator/v10"
 	"github.com/iambpn/go-schema-validator/v3/validator"
 )
 
@@ -157,120 +170,77 @@ type User struct {
 
 func main() {
 	ctx := context.Background()
+	v := pgValidator.New()
 
-	reader := strings.NewReader(`{"name":"Streamed","age":25}`)
-	validated, valErrs := validator.NewStruct[User]().
-		AddFieldRules("Name", func(v *validator.Validator) { v.Required() }).
-		AddFieldRules("Age", func(v *validator.Validator) { v.Min(18) }).
-		ValidateIOReaderCtx(ctx, reader)
+	reader := strings.NewReader(`{"Name":"Streamed","Age":21}`)
 
-	if valErrs != nil {
-		panic(valErrs[0].Messages[0])
-	}
+	validated, errs := validator.NewStruct[User]().
+		AddFieldRules("Name", func(fv *validator.FieldValidator) { fv.Required() }).
+		AddFieldRules("Age", func(fv *validator.FieldValidator) { fv.Min(18) }).
+		ValidateIOReaderCtx(ctx, v, reader)
 
 	_ = validated
+	if errs != nil {
+		panic(errs.ToErrorMap())
+	}
 }
 ```
 
-### Configuration options
+### 5) Configuration knobs
+
+`config.SetReturnEarly(bool)` controls whether validation stops at the first error (default: `true`). Pass it to any `Validate*Ctx` call:
 
 ```go
-package main
-
-import (
-	"context"
-	"fmt"
-
-	"github.com/iambpn/go-schema-validator/v3/internal/config"
-	"github.com/iambpn/go-schema-validator/v3/validator"
-)
-
-type User struct {
-	Name  string
-	Email string
-}
-
-func main() {
-	ctx := context.Background()
-
-	userValidator := validator.NewStruct[User]().
-		AddFieldRules("Name", func(v *validator.Validator) {
-			v.Required("Name is required")
-		}).
-		AddFieldRules("Email", func(v *validator.Validator) {
-			v.Required("Email is required").Email("Invalid email")
-		})
-
-	user := User{Name: "", Email: "invalid"}
-
-	// Return early on first error (default behavior)
-	valErrs := userValidator.ValidateCtx(ctx, &user, config.SetReturnEarly(true))
-	if valErrs != nil {
-		fmt.Printf("First error only: %v\n", valErrs[0].Messages[0])
-	}
-
-	// Collect all validation errors
-	valErrs = userValidator.ValidateCtx(ctx, &user, config.SetReturnEarly(false))
-	if valErrs != nil {
-		for _, err := range valErrs {
-			fmt.Printf("Field '%s': %v\n", err.Field, err.Messages)
-		}
-	}
-}
+errs := userValidator.ValidateCtx(ctx, v, &candidate, config.SetReturnEarly(false))
 ```
 
 ## Exposed APIs
 
-### Validator (for single values)
+In the signatures below, `pgValidator` refers to `github.com/go-playground/validator/v10`.
 
-- `validator.New() *validator.Validator`: create a fluent rule builder for scalar values
-- `(*validator.Validator).AddRule(tag string, message ...string) *Validator`: attach go-playground tags with optional messages
-- `(*validator.Validator).Required/Email/Min/Max/Int(message ...string) *Validator`: helper methods wrapping common rules
-- `(*validator.Validator).ValidateCtx(ctx context.Context, value any) error`: validate a value against the configured rule set
+### Field validation
 
-### StructValidator (for struct types)
+- `validator.New() *FieldValidator` — create a rule builder for scalar values
+- `(*FieldValidator).AddRule(tag string, message ...string) *FieldValidator` — attach a go-playground tag with an optional message
+- Helper shortcuts: `Required`, `Email`, `Min`, `Max`, `Length`, `Optional` (adds `omitempty`), `URL`, `UUID`, `IsNumber`, `IsBoolean`
+- `(*FieldValidator).ValidateFieldCtx(ctx context.Context, v *pgValidator.Validate, value any) error` — run rules against a single value (panic-safe)
 
-- `validator.NewStruct[T any]() *validator.StructValidator[T]`: build validations for struct types
-- `(*validator.StructValidator[T]).AddFieldRules(name string, fn func(*validator.Validator)) *StructValidator[T]`: register rules for struct fields
-- `(*validator.StructValidator[T]).ValidateCtx(ctx context.Context, structPtr *T, configs ...config.Config) []validator.ValidationError`: validate an instance with optional configuration
-- `(*validator.StructValidator[T]).ValidateAnyCtx(ctx context.Context, value any) (*T, []validator.ValidationError)`: validate a generic value castable to `T`
-- `(*validator.StructValidator[T]).ValidateIOReaderCtx(ctx context.Context, reader io.Reader) (*T, []validator.ValidationError)`: decode JSON from a reader and validate it
+### Struct validation
 
-### High-level helpers
+- `validator.NewStruct[T any]() *StructValidator[T]` — build validations for struct types
+- `(*StructValidator[T]).AddFieldRules(name string, fn func(*FieldValidator)) *StructValidator[T]` — register rules for a struct field
+- `(*StructValidator[T]).ValidateCtx(ctx context.Context, v *pgValidator.Validate, structPtr *T, configs ...config.Config) ValidationErrors` — validate a struct instance
+- `(*StructValidator[T]).ValidateAnyCtx(ctx context.Context, v *pgValidator.Validate, value any, configs ...config.Config) (*T, ValidationErrors)` — validate a value type-assertable to `T`
+- `(*StructValidator[T]).ValidateIOReaderCtx(ctx context.Context, v *pgValidator.Validate, reader io.Reader, configs ...config.Config) (*T, ValidationErrors)` — decode JSON from a reader and validate it
 
-- `validator.ValidateStructCtx[S any](ctx context.Context, data any, configs ...config.Config) (*S, []validator.ValidationError)`: high-level helper that leverages the interfaces below
+### High-level helper
+
+- `validator.ValidateStructCtx[S any](ctx context.Context, v *pgValidator.Validate, data any, configs ...config.Config) (*S, ValidationErrors)` — validate structs (or readers) implementing `ValidationRules`/`CustomValidate`
 
 ### Interfaces
 
-- `validator.ValidationRules[T]`: interface for declaring struct rules
-  - `ValidationRules(sv *StructValidator[T])`
-- `validator.CustomValidate[T]`: interface for supplying custom or cross-field validation logic
-  - `CustomValidate(ctx context.Context, data *T, sv *StructValidator[T]) ValidationErrors`
+- `validator.ValidationRules[T]` — declare field rules via `ValidationRules(sv *StructValidator[T])`
+- `validator.CustomValidate[T]` — supply custom or cross-field logic via `CustomValidate(ctx, v, data, sv)`
 
-### Types
+### Types & utilities
 
-- `validator.ValidationError`: structured error type
-  ```go
-  type ValidationError struct {
-      Field    string   `json:"field"`
-      Messages []string `json:"messages"`
-  }
-  ```
+- `type ValidationError struct { Field string; Messages []string }`
+- `type ValidationErrors map[string]ValidationError` with `ToErrorMap()` for `map[string][]string`
 
 ### Configuration
 
-- `config.SetReturnEarly(val bool) config.Config`: configure whether validation should stop at the first error (default: `true`) or collect all errors
-- `config.GetDefaultConfig() config.Config`: get default configuration (returns early on first error)
-- `config.MergeConfigs(configs ...config.Config) config.Config`: merge multiple configurations
+- `config.SetReturnEarly(val bool) config.Config`
+- `config.GetDefaultConfig() config.Config`
+- `config.MergeConfigs(configs ...config.Config) config.Config`
 
 ## Contributing
 
-- Fork the repository and create a feature branch
-- Run `make test` or `go test ./... -v -cover` before submitting a pull request
-- Use `make run` or `go run ./cmd/main.go` to experiment with the examples
-- Run `make html-coverage` to generate a coverage report
-- Open a PR describing the change, tests, and any new validation helpers
+1. Fork the repo and create a feature branch.
+2. Keep changes formatted (`gofmt` is fine) and add tests where relevant.
+3. Run the suite before opening a PR: `make test` (or `go test ./... -v -cover`).
+4. Try the example app with `make run` and generate coverage via `make html-coverage` if helpful.
+5. Open a PR describing what changed, why, and how it was tested.
 
 ## License
 
-This project is licensed under the MIT License. See `LICENSE` for details.
+MIT License – see `LICENSE` for details.

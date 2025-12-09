@@ -1,4 +1,4 @@
-# go-schema-validator
+# go-schema-validator (v2 is depreciated, please refer to [v3](./v3/README.md))
 
 golang-schema-validator is a zod like API used to validation user input. It allows user to define a validation schema and add a custom message while creating validation schema and returns the custom message on validation failed.
 

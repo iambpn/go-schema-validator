@@ -64,6 +64,6 @@ func main() {
 
 	valErr := userSchema.ValidateCtx(ctx, v, &user)
 	if valErr != nil {
-		fmt.Println("User validation error:", valErr["Name"].Messages[0])
+		fmt.Println("User validation error:", valErr.ToErrorMap())
 	}
 }

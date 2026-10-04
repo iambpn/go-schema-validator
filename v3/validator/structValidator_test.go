@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	pgValidator "github.com/go-playground/validator/v10"
-	"github.com/iambpn/go-schema-validator/v3/internal/config"
+	"github.com/iambpn/go-schema-validator/v3/config"
 )
 
 type User struct {
@@ -626,5 +626,184 @@ func TestValidateStruct_ReturnEarlyWithFieldValidationError(t *testing.T) {
 
 	if len(err) != 1 {
 		t.Fatalf("Expected 1 error with ReturnEarly=true, got %d", len(err))
+	}
+}
+
+type userWithUnexportedField struct {
+	Name string
+	age  int
+}
+
+func TestValidateStruct_FieldMissingWithReturnEarlyFalse(t *testing.T) {
+	v := pgValidator.New()
+
+	sv := NewStruct[User]().
+		AddFieldRules("UnknownField", func(v *FieldValidator) {
+			v.AddRule("required", "UnknownField is required")
+		}).
+		AddFieldRules("Name", func(v *FieldValidator) {
+			v.AddRule("required", "Name is required")
+		})
+
+	// should report the missing field and keep validating the other fields
+	valErrs := sv.ValidateCtx(t.Context(), v, &User{}, config.SetReturnEarly(false))
+
+	if len(valErrs) != 2 {
+		t.Fatalf("Expected 2 errors, got %v", valErrs.ToErrorMap())
+	}
+
+	expected := "field UnknownField does not exist"
+	if valErrs["UnknownField"].Messages[0] != expected {
+		t.Fatalf("Expected error message '%s', got '%s'", expected, valErrs["UnknownField"].Messages[0])
+	}
+
+	if valErrs["Name"].Messages[0] != "Name is required" {
+		t.Fatalf("Expected error message 'Name is required', got '%s'", valErrs["Name"].Messages[0])
+	}
+}
+
+func TestValidateStruct_UnexportedField(t *testing.T) {
+	v := pgValidator.New()
+
+	sv := NewStruct[userWithUnexportedField]().
+		AddFieldRules("age", func(v *FieldValidator) {
+			v.AddRule("min=18", "age must be at least 18")
+		})
+
+	user := userWithUnexportedField{Name: "John", age: 10}
+
+	assertFirstErrorMessage(&user, sv, v, "age", "field age is not exported", t)
+}
+
+func TestValidateStruct_ReturnEarlyFollowsFieldOrder(t *testing.T) {
+	v := pgValidator.New()
+
+	// run many times because map iteration order is random
+	for range 50 {
+		sv := NewStruct[User]().
+			AddFieldRules("Name", func(v *FieldValidator) {
+				v.AddRule("required", "Name is required")
+			}).
+			AddFieldRules("Age", func(v *FieldValidator) {
+				v.AddRule("min=18", "Age must be at least 18")
+			})
+
+		valErrs := sv.ValidateCtx(t.Context(), v, &User{})
+
+		if len(valErrs) != 1 {
+			t.Fatalf("Expected 1 error with ReturnEarly=true, got %d", len(valErrs))
+		}
+
+		if _, ok := valErrs["Name"]; !ok {
+			t.Fatalf("Expected error for the first added field 'Name', got %v", valErrs.ToErrorMap())
+		}
+	}
+}
+
+func TestAddFieldRules_SameFieldTwiceReplacesRules(t *testing.T) {
+	v := pgValidator.New()
+
+	sv := NewStruct[User]().
+		AddFieldRules("Name", func(v *FieldValidator) {
+			v.AddRule("required", "first message")
+		}).
+		AddFieldRules("Name", func(v *FieldValidator) {
+			v.AddRule("required", "second message")
+		})
+
+	if len(sv.fieldOrder) != 1 {
+		t.Fatalf("Expected field to be listed once, got %v", sv.fieldOrder)
+	}
+
+	assertFirstErrorMessage(&User{}, sv, v, "Name", "second message", t)
+}
+
+func TestValidateAnyCtx_UsesConfig(t *testing.T) {
+	v := pgValidator.New()
+
+	sv := NewStruct[User]().
+		AddFieldRules("Name", func(v *FieldValidator) {
+			v.AddRule("required", "Name is required")
+		}).
+		AddFieldRules("Age", func(v *FieldValidator) {
+			v.AddRule("min=18", "Age must be at least 18")
+		})
+
+	_, valErrs := sv.ValidateAnyCtx(t.Context(), v, User{}, config.SetReturnEarly(false))
+
+	if len(valErrs) != 2 {
+		t.Fatalf("Expected 2 errors with ReturnEarly=false, got %v", valErrs.ToErrorMap())
+	}
+}
+
+func TestValidateIOReaderCtx_UsesConfig(t *testing.T) {
+	v := pgValidator.New()
+
+	sv := NewStruct[User]().
+		AddFieldRules("Name", func(v *FieldValidator) {
+			v.AddRule("required", "Name is required")
+		}).
+		AddFieldRules("Age", func(v *FieldValidator) {
+			v.AddRule("min=18", "Age must be at least 18")
+		})
+
+	_, valErrs := sv.ValidateIOReaderCtx(t.Context(), v, strings.NewReader(`{}`), config.SetReturnEarly(false))
+
+	if len(valErrs) != 2 {
+		t.Fatalf("Expected 2 errors with ReturnEarly=false, got %v", valErrs.ToErrorMap())
+	}
+}
+
+func TestValidateAnyCtx_WithPointer(t *testing.T) {
+	v := pgValidator.New()
+
+	sv := NewStruct[User]().
+		AddFieldRules("Name", func(v *FieldValidator) {
+			v.AddRule("required", "Name is required")
+		})
+
+	user := &User{Name: "John", Age: 30}
+
+	validatedUser, valErrs := sv.ValidateAnyCtx(t.Context(), v, user)
+
+	if valErrs != nil {
+		t.Fatalf("Expected no error validating pointer to struct, got %v", valErrs.ToErrorMap())
+	}
+
+	if validatedUser != user {
+		t.Fatalf("Expected the same pointer to be returned")
+	}
+
+	var nilUser *User
+	_, valErrs = sv.ValidateAnyCtx(t.Context(), v, nilUser)
+
+	if valErrs == nil {
+		t.Fatalf("Expected validation to fail for nil pointer, got nil")
+	}
+}
+
+func TestValidateIOReaderCtx_WithTrailingData(t *testing.T) {
+	v := pgValidator.New()
+
+	sv := NewStruct[User]().
+		AddFieldRules("Name", func(v *FieldValidator) {
+			v.AddRule("required", "Name is required")
+		})
+
+	_, valErrs := sv.ValidateIOReaderCtx(t.Context(), v, strings.NewReader(`{"Name":"John"} garbage`))
+
+	if valErrs == nil {
+		t.Fatalf("Expected validation to fail for data after the JSON value, got nil")
+	}
+
+	if !strings.Contains(valErrs["error"].Messages[0], "failed to decode") {
+		t.Fatalf("Expected decode error, got: %v", valErrs["error"].Messages[0])
+	}
+
+	// whitespace after the JSON value is allowed
+	_, valErrs = sv.ValidateIOReaderCtx(t.Context(), v, strings.NewReader("{\"Name\":\"John\"}\n"))
+
+	if valErrs != nil {
+		t.Fatalf("Expected no error for trailing whitespace, got %v", valErrs.ToErrorMap())
 	}
 }

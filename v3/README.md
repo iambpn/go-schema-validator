@@ -12,7 +12,7 @@ This library wraps go-playground/validator with a small, fluent API. You describ
 - Context-aware validation for values, structs, and JSON streams
 - Go generics for type-safe struct validation (`StructValidator[T]`)
 - Helper methods for common rules (`Required`, `Email`, `Min`, `Max`, `Length`, `Optional`, `URL`, `UUID`, `IsNumber`, `IsBoolean`)
-- Configurable error aggregation (stop on first error or collect all)
+- Configurable error aggregation (stop on the first failing field or collect one error per failing field)
 - Structured error reporting with `ValidationError`/`ValidationErrors`
 - Interfaces for declarative rules and custom validation hooks
 - Panic-safe single-value validation (recovers and surfaces errors)
@@ -67,7 +67,7 @@ import (
 	"fmt"
 
 	pgValidator "github.com/go-playground/validator/v10"
-	"github.com/iambpn/go-schema-validator/v3/internal/config"
+	"github.com/iambpn/go-schema-validator/v3/config"
 	"github.com/iambpn/go-schema-validator/v3/validator"
 )
 
@@ -188,11 +188,13 @@ func main() {
 
 ### 5) Configuration knobs
 
-`config.SetReturnEarly(bool)` controls whether validation stops at the first error (default: `true`). Pass it to any `Validate*Ctx` call:
+`config.SetReturnEarly(bool)` controls whether validation stops at the first failing field (default: `true`). Pass it to any `Validate*Ctx` call:
 
 ```go
 errs := userValidator.ValidateCtx(ctx, v, &candidate, config.SetReturnEarly(false))
 ```
+
+Fields are validated in the order they were added. With `SetReturnEarly(false)` every failing field is reported, and each field reports the message of its first failed rule.
 
 ## Exposed APIs
 
@@ -202,7 +204,7 @@ In the signatures below, `pgValidator` refers to `github.com/go-playground/valid
 
 - `validator.New() *FieldValidator` — create a rule builder for scalar values
 - `(*FieldValidator).AddRule(tag string, message ...string) *FieldValidator` — attach a go-playground tag with an optional message
-- Helper shortcuts: `Required`, `Email`, `Min`, `Max`, `Length`, `Optional` (adds `omitempty`), `URL`, `UUID`, `IsNumber`, `IsBoolean`
+- Helper shortcuts: `Required`, `Email`, `Min`, `Max`, `Length`, `Optional` (adds `omitempty` before the other rules), `URL`, `UUID`, `IsNumber`, `IsBoolean`
 - `(*FieldValidator).ValidateFieldCtx(ctx context.Context, v *pgValidator.Validate, value any) error` — run rules against a single value (panic-safe)
 
 ### Struct validation
@@ -210,12 +212,12 @@ In the signatures below, `pgValidator` refers to `github.com/go-playground/valid
 - `validator.NewStruct[T any]() *StructValidator[T]` — build validations for struct types
 - `(*StructValidator[T]).AddFieldRules(name string, fn func(*FieldValidator)) *StructValidator[T]` — register rules for a struct field
 - `(*StructValidator[T]).ValidateCtx(ctx context.Context, v *pgValidator.Validate, structPtr *T, configs ...config.Config) ValidationErrors` — validate a struct instance
-- `(*StructValidator[T]).ValidateAnyCtx(ctx context.Context, v *pgValidator.Validate, value any, configs ...config.Config) (*T, ValidationErrors)` — validate a value type-assertable to `T`
-- `(*StructValidator[T]).ValidateIOReaderCtx(ctx context.Context, v *pgValidator.Validate, reader io.Reader, configs ...config.Config) (*T, ValidationErrors)` — decode JSON from a reader and validate it
+- `(*StructValidator[T]).ValidateAnyCtx(ctx context.Context, v *pgValidator.Validate, value any, configs ...config.Config) (*T, ValidationErrors)` — validate a value that is a `T` or a `*T`
+- `(*StructValidator[T]).ValidateIOReaderCtx(ctx context.Context, v *pgValidator.Validate, reader io.Reader, configs ...config.Config) (*T, ValidationErrors)` — decode one JSON value from a reader and validate it (extra data after the value is an error)
 
 ### High-level helper
 
-- `validator.ValidateStructCtx[S any](ctx context.Context, v *pgValidator.Validate, data any, configs ...config.Config) (*S, ValidationErrors)` — validate structs (or readers) implementing `ValidationRules`/`CustomValidate`
+- `validator.ValidateStructCtx[S any](ctx context.Context, v *pgValidator.Validate, data any, configs ...config.Config) (*S, ValidationErrors)` — validate structs, struct pointers or readers for types implementing `ValidationRules`/`CustomValidate`
 
 ### Interfaces
 

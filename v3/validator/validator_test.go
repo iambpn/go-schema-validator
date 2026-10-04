@@ -191,3 +191,38 @@ func TestValidate_NoMatchingRuleError(t *testing.T) {
 		t.Errorf("Expected error to contain 'custom max message', got: %v", err.Error())
 	}
 }
+
+func TestValidate_MessageMatchesExactRule(t *testing.T) {
+	v := pgValidator.New()
+
+	// 'lte' starts with 'lt', but only the failed 'lt' rule should give its message
+	err := New().
+		AddRule("lte=100", "lte message").
+		AddRule("lt=5", "lt message").
+		ValidateFieldCtx(t.Context(), v, 50)
+
+	if err == nil || err.Error() != "lt message" {
+		t.Errorf("Expected 'lt message', got: %v", err)
+	}
+
+	err = New().
+		AddRule("alphanum", "alphanum message").
+		AddRule("alpha", "alpha message").
+		ValidateFieldCtx(t.Context(), v, "abc1")
+
+	if err == nil || err.Error() != "alpha message" {
+		t.Errorf("Expected 'alpha message', got: %v", err)
+	}
+}
+
+func TestValidate_MessageForOrRule(t *testing.T) {
+	v := pgValidator.New()
+
+	err := New().
+		AddRule("eq=a|eq=b", "must be a or b").
+		ValidateFieldCtx(t.Context(), v, "c")
+
+	if err == nil || err.Error() != "must be a or b" {
+		t.Errorf("Expected 'must be a or b', got: %v", err)
+	}
+}

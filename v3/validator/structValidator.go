@@ -3,12 +3,14 @@ package validator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 
 	pgValidator "github.com/go-playground/validator/v10"
-	"github.com/iambpn/go-schema-validator/v3/internal/config"
+	"github.com/iambpn/go-schema-validator/v3/config"
 )
 
 // ValidationError represents a validation error for a specific field
@@ -17,7 +19,7 @@ type ValidationError struct {
 	Messages []string `json:"messages"`
 }
 
-// ValidationErrors is type alias to slice of ValidationError
+// ValidationErrors maps a field name to its ValidationError.
 type ValidationErrors map[string]ValidationError
 
 // Method to convert ValidationErrors to a map
@@ -31,6 +33,10 @@ func (ve ValidationErrors) ToErrorMap() map[string][]string {
 
 type StructValidator[T any] struct {
 	rules map[string]*FieldValidator
+	// fieldOrder keeps the field names in the order they were added, so fields are validated in a stable order.
+	fieldOrder []string
+	// configs holds the configs passed to ValidateStructCtx, so a CustomValidate hook that calls ValidateCtx still uses them.
+	configs []config.Config
 }
 
 // Method to create a struct validation
@@ -46,6 +52,9 @@ func (sv *StructValidator[T]) AddFieldRules(name string, addRules func(*FieldVal
 
 	addRules(validator)
 
+	if _, exists := sv.rules[name]; !exists {
+		sv.fieldOrder = append(sv.fieldOrder, name)
+	}
 	sv.rules[name] = validator
 
 	return sv
@@ -53,7 +62,7 @@ func (sv *StructValidator[T]) AddFieldRules(name string, addRules func(*FieldVal
 
 // ValidateCtx Method to validate a struct with custom validator instance
 func (sv *StructValidator[T]) ValidateCtx(ctx context.Context, v *pgValidator.Validate, structVal *T, configs ...config.Config) ValidationErrors {
-	mergedConfig := config.MergeConfigs(configs...)
+	mergedConfig := config.MergeConfigs(slices.Concat(sv.configs, configs)...)
 
 	val := reflect.ValueOf(structVal)
 
@@ -71,51 +80,19 @@ func (sv *StructValidator[T]) ValidateCtx(ctx context.Context, v *pgValidator.Va
 	}
 
 	valErrs := make(ValidationErrors)
-	for fieldName, fv := range sv.rules {
-		field := val.FieldByName(fieldName)
-
-		// check if value is exist and is usable
-		if !field.IsValid() {
-			if mergedConfig[config.ReturnEarly] {
-				return ValidationErrors{
-					fieldName: ValidationError{
-						Field:    fieldName,
-						Messages: []string{fmt.Sprintf("field %s does not exist", fieldName)},
-					},
-				}
-			}
-
-			if valErr, ok := valErrs[fieldName]; ok {
-				valErr.Messages = append(valErr.Messages, fmt.Sprintf("field %s does not exist", fieldName))
-				valErrs[fieldName] = valErr
-			} else {
-				valErrs[fieldName] = ValidationError{
-					Field:    fieldName,
-					Messages: []string{fmt.Sprintf("field %s does not exist", fieldName)},
-				}
-			}
+	for _, fieldName := range sv.fieldOrder {
+		err := sv.validateField(ctx, v, val, fieldName)
+		if err == nil {
+			continue
 		}
 
-		err := fv.ValidateFieldCtx(ctx, v, field.Interface())
-		if err != nil {
-			if mergedConfig[config.ReturnEarly] {
-				return ValidationErrors{
-					fieldName: ValidationError{
-						Field:    fieldName,
-						Messages: []string{fmt.Sprintf("%s", err)},
-					},
-				}
-			}
+		valErrs[fieldName] = ValidationError{
+			Field:    fieldName,
+			Messages: []string{err.Error()},
+		}
 
-			if arr, ok := valErrs[fieldName]; ok {
-				arr.Messages = append(arr.Messages, fmt.Sprintf("%s", err))
-				valErrs[fieldName] = arr
-			} else {
-				valErrs[fieldName] = ValidationError{
-					Field:    fieldName,
-					Messages: []string{fmt.Sprintf("%s", err)},
-				}
-			}
+		if mergedConfig[config.ReturnEarly] {
+			return valErrs
 		}
 	}
 
@@ -126,9 +103,55 @@ func (sv *StructValidator[T]) ValidateCtx(ctx context.Context, v *pgValidator.Va
 	return nil
 }
 
+// validateField validates one field of the struct with the rules added for it.
+func (sv *StructValidator[T]) validateField(ctx context.Context, v *pgValidator.Validate, structVal reflect.Value, fieldName string) error {
+	field := structVal.FieldByName(fieldName)
+
+	// check if value is exist and is usable
+	if !field.IsValid() {
+		return fmt.Errorf("field %s does not exist", fieldName)
+	}
+
+	// Reflection cannot read the value of an unexported field.
+	if !field.CanInterface() {
+		return fmt.Errorf("field %s is not exported", fieldName)
+	}
+
+	return sv.rules[fieldName].ValidateFieldCtx(ctx, v, field.Interface())
+}
+
+// toStructPointer returns a pointer to the struct when the value is either T or a non-nil *T.
+func toStructPointer[T any](value any) (*T, bool) {
+	switch typed := value.(type) {
+	case T:
+		return &typed, true
+	case *T:
+		return typed, typed != nil
+	}
+
+	return nil, false
+}
+
+// decodeJSON decodes exactly one JSON value from the reader into target.
+func decodeJSON(reader io.Reader, target any) error {
+	decoder := json.NewDecoder(reader)
+
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+
+	// Any token after the first JSON value means the reader has extra data.
+	if _, err := decoder.Token(); err != io.EOF {
+		return errors.New("unexpected data after the JSON value")
+	}
+
+	return nil
+}
+
 // ValidateAnyCtx Method to validate a struct from any type with custom validator instance
+// structKind can be either T or a pointer to T.
 func (sv *StructValidator[T]) ValidateAnyCtx(ctx context.Context, v *pgValidator.Validate, structKind any, configs ...config.Config) (*T, ValidationErrors) {
-	structVal, ok := structKind.(T)
+	structVal, ok := toStructPointer[T](structKind)
 
 	if !ok {
 		return nil, ValidationErrors{
@@ -139,13 +162,13 @@ func (sv *StructValidator[T]) ValidateAnyCtx(ctx context.Context, v *pgValidator
 		}
 	}
 
-	valErrs := sv.ValidateCtx(ctx, v, &structVal)
+	valErrs := sv.ValidateCtx(ctx, v, structVal, configs...)
 
 	if valErrs != nil {
 		return nil, valErrs
 	}
 
-	return &structVal, nil
+	return structVal, nil
 }
 
 // ValidateIOReaderCtx Method to validate a struct from an io.Reader
@@ -154,7 +177,7 @@ func (sv *StructValidator[T]) ValidateAnyCtx(ctx context.Context, v *pgValidator
 func (sv *StructValidator[T]) ValidateIOReaderCtx(ctx context.Context, v *pgValidator.Validate, reader io.Reader, configs ...config.Config) (*T, ValidationErrors) {
 	var structVal T
 
-	err := json.NewDecoder(reader).Decode(&structVal)
+	err := decodeJSON(reader, &structVal)
 	if err != nil {
 		return nil, ValidationErrors{
 			"error": ValidationError{
@@ -164,7 +187,7 @@ func (sv *StructValidator[T]) ValidateIOReaderCtx(ctx context.Context, v *pgVali
 		}
 	}
 
-	valErrs := sv.ValidateCtx(ctx, v, &structVal)
+	valErrs := sv.ValidateCtx(ctx, v, &structVal, configs...)
 	if valErrs != nil {
 		return nil, valErrs
 	}

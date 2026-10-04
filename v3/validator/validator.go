@@ -45,7 +45,19 @@ func (v *FieldValidator) compileRules() string {
 	return strings.Join(rules, ",")
 }
 
-// ValidateFieldCtxWithValidator Method to validate a non-struct value with a provided validator instance
+// ruleTag returns the tag that go-playground reports when the rule fails.
+func ruleTag(rule string) string {
+	// Rules joined with "|" are reported with the full rule text, for example "eq=a|eq=b".
+	if strings.Contains(rule, "|") {
+		return rule
+	}
+
+	// Other rules are reported without their parameters, for example "min=3" is reported as "min".
+	name, _, _ := strings.Cut(rule, "=")
+	return name
+}
+
+// ValidateFieldCtx Method to validate a non-struct value with a provided validator instance
 // This method recovers from panics and returns them as errors
 func (v *FieldValidator) ValidateFieldCtx(ctx context.Context, pgVal *pgValidator.Validate, value any) (err error) {
 	// recover from panics and return them as errors
@@ -69,7 +81,7 @@ func (v *FieldValidator) ValidateFieldCtx(ctx context.Context, pgVal *pgValidato
 
 	for _, e := range errs {
 		for _, rule := range v.fieldRules {
-			if strings.HasPrefix(rule.rule, e.Tag()) {
+			if ruleTag(rule.rule) == e.Tag() {
 				if rule.message != "" {
 					return errors.New(rule.message)
 				}

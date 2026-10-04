@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	pgValidator "github.com/go-playground/validator/v10"
-	"github.com/iambpn/go-schema-validator/v3/internal/config"
+	"github.com/iambpn/go-schema-validator/v3/config"
 )
 
 // implement Validate interface for User struct
@@ -370,5 +370,57 @@ func TestValidateStruct_CustomValidateOnlyWithSuccess(t *testing.T) {
 
 	if validatedData.Field1 != "test" || validatedData.Field2 != 5 {
 		t.Fatalf("Expected validated data to match input, got %v", *validatedData)
+	}
+}
+
+func TestValidateStruct_withPointerInput(t *testing.T) {
+	user := &User{
+		Name: "name",
+		Age:  18,
+	}
+	v := pgValidator.New()
+
+	validatedUser, valErr := ValidateStructCtx[User](t.Context(), v, user)
+
+	if valErr != nil {
+		t.Fatalf("Expected validation to pass, got error: %v", valErr.ToErrorMap())
+	}
+
+	if validatedUser != user {
+		t.Fatalf("Expected the same pointer to be returned")
+	}
+}
+
+type CustomValidateWithRules struct {
+	Field1 string
+	Field2 string
+}
+
+func (cv *CustomValidateWithRules) ValidationRules(sv *StructValidator[CustomValidateWithRules]) {
+	sv.AddFieldRules("Field1", func(v *FieldValidator) {
+		v.AddRule("required", "Field1 is required")
+	})
+	sv.AddFieldRules("Field2", func(v *FieldValidator) {
+		v.AddRule("required", "Field2 is required")
+	})
+}
+
+func (cv *CustomValidateWithRules) CustomValidate(ctx context.Context, v *pgValidator.Validate, data *CustomValidateWithRules, sv *StructValidator[CustomValidateWithRules]) ValidationErrors {
+	return sv.ValidateCtx(ctx, v, data)
+}
+
+func TestValidateStruct_CustomValidateUsesConfig(t *testing.T) {
+	v := pgValidator.New()
+
+	_, valErr := ValidateStructCtx[CustomValidateWithRules](t.Context(), v, CustomValidateWithRules{}, config.SetReturnEarly(false))
+
+	if len(valErr) != 2 {
+		t.Fatalf("Expected 2 errors with ReturnEarly=false, got %v", valErr.ToErrorMap())
+	}
+
+	_, valErr = ValidateStructCtx[CustomValidateWithRules](t.Context(), v, CustomValidateWithRules{})
+
+	if len(valErr) != 1 {
+		t.Fatalf("Expected 1 error with default config, got %v", valErr.ToErrorMap())
 	}
 }

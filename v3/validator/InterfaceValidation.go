@@ -2,12 +2,11 @@ package validator
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 
 	pgValidator "github.com/go-playground/validator/v10"
-	"github.com/iambpn/go-schema-validator/v3/internal/config"
+	"github.com/iambpn/go-schema-validator/v3/config"
 )
 
 // ValidationRules Interface for adding validation rule for struct validation
@@ -27,14 +26,14 @@ type CustomValidate[T any] interface {
 // ValidateStructCtx Method validates the data to generic struct that had
 // implemented ValidationRules or CustomValidate interface.
 //
-// data can be either struct or io.Reader
+// data can be either struct, pointer to struct or io.Reader.
 // Returns pointer to validated struct and error if validation fails
 func ValidateStructCtx[S any](ctx context.Context, v *pgValidator.Validate, data any, configs ...config.Config) (*S, ValidationErrors) {
 	val := new(S)
 
 	// check if data is reader
 	if reader, ok := data.(io.Reader); ok {
-		err := json.NewDecoder(reader).Decode(val)
+		err := decodeJSON(reader, val)
 
 		if err != nil {
 			valErrs := ValidationErrors{
@@ -45,8 +44,8 @@ func ValidateStructCtx[S any](ctx context.Context, v *pgValidator.Validate, data
 			}
 			return nil, valErrs
 		}
-	} else if structVal, ok := data.(S); ok {
-		val = &structVal
+	} else if structVal, ok := toStructPointer[S](data); ok {
+		val = structVal
 	} else {
 		valErrs := ValidationErrors{
 			"error": ValidationError{
@@ -61,6 +60,7 @@ func ValidateStructCtx[S any](ctx context.Context, v *pgValidator.Validate, data
 	// validate struct with validation rules
 	if validateRuleInf, ok := any(val).(ValidationRules[S]); ok {
 		sv := NewStruct[S]()
+		sv.configs = configs
 		validateRuleInf.ValidationRules(sv)
 
 		var valErrs ValidationErrors = nil
@@ -84,6 +84,7 @@ func ValidateStructCtx[S any](ctx context.Context, v *pgValidator.Validate, data
 	if validateInf, ok := any(val).(CustomValidate[S]); ok {
 		// user specified validation without validation rules
 		sv := NewStruct[S]()
+		sv.configs = configs
 		valErrs := validateInf.CustomValidate(ctx, v, val, sv)
 
 		if valErrs != nil {

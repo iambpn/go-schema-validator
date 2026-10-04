@@ -1,6 +1,9 @@
 package validator
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // Helper method for validating number
 func (s *FieldValidator) IsNumber(message ...string) *FieldValidator {
@@ -33,8 +36,11 @@ func (s *FieldValidator) Email(message ...string) *FieldValidator {
 }
 
 // Helper method for validating Optional fields
+//
+// The omitempty rule is added before the other rules, because go-playground only skips the rules that come after it.
 func (s *FieldValidator) Optional() *FieldValidator {
-	return s.AddRule("omitempty")
+	s.fieldRules = slices.Insert(s.fieldRules, 0, validationRule{rule: "omitempty"})
+	return s
 }
 
 // Helper method for validating URL

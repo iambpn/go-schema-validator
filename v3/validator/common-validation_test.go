@@ -217,3 +217,23 @@ func TestLength(t *testing.T) {
 		t.Errorf("Expected error on string longer than 5, got %v", err)
 	}
 }
+
+func TestOptional_AfterOtherRules(t *testing.T) {
+	s := New().Email("Must be a valid email").Optional()
+	v := pgValidator.New()
+
+	ctx := t.Context()
+
+	// Optional should skip the other rules for an empty value, even when it is added last
+	err := s.ValidateFieldCtx(ctx, v, "")
+
+	if err != nil {
+		t.Errorf("Expected no error on empty string with Optional, got %v", err)
+	}
+
+	err = s.ValidateFieldCtx(ctx, v, "not-an-email")
+
+	if err == nil {
+		t.Errorf("Expected error on invalid email with Optional, got %v", err)
+	}
+}

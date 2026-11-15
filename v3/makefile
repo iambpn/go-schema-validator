@@ -10,5 +10,5 @@ view-coverage:
 html-coverage:
 	go tool cover -html=coverage.out -o coverage.html
 
-.PHONY: test run
+.PHONY: run test view-coverage html-coverage
 

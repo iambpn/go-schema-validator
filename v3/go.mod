@@ -1,6 +1,6 @@
 module github.com/iambpn/go-schema-validator/v3
 
-go 1.25.0
+go 1.24.0
 
 require github.com/go-playground/validator/v10 v10.28.0
 

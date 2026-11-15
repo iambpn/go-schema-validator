@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 	"github.com/iambpn/go-schema-validator/v3/config"
 )
 
-// implement Validate interface for User struct
+// ValidationRules declares the field rules of User for ValidateStructCtx: Name is required and Age must be at least 18.
 func (u *User) ValidationRules(sv *StructValidator[User]) {
 	sv.AddFieldRules("Name", func(v *FieldValidator) {
 		v.AddRule("required", "Name is required")
@@ -22,6 +23,7 @@ func (u *User) ValidationRules(sv *StructValidator[User]) {
 	})
 }
 
+// TestValidateStruct_withReader checks that ValidateStructCtx decodes and validates JSON from a reader.
 func TestValidateStruct_withReader(t *testing.T) {
 	user := User{
 		Name: "name",
@@ -48,11 +50,13 @@ func TestValidateStruct_withReader(t *testing.T) {
 	}
 }
 
+// InvalidUser is a struct with other fields than User. Tests use it as the wrong input type.
 type InvalidUser struct {
 	Name string
 	DOB  string
 }
 
+// TestValidateStruct_withReaderAndError checks that ValidateStructCtx fails for JSON from another struct type, because Age is then 0.
 func TestValidateStruct_withReaderAndError(t *testing.T) {
 	user := InvalidUser{
 		Name: "name",
@@ -75,6 +79,7 @@ func TestValidateStruct_withReaderAndError(t *testing.T) {
 	}
 }
 
+// TestValidateStruct_withStructInput checks that ValidateStructCtx accepts a valid struct value and returns an equal struct.
 func TestValidateStruct_withStructInput(t *testing.T) {
 	user := User{
 		Name: "ValidUser",
@@ -93,6 +98,7 @@ func TestValidateStruct_withStructInput(t *testing.T) {
 	}
 }
 
+// TestValidateStruct_withStructInputAndError checks that ValidateStructCtx rejects a value of another struct type.
 func TestValidateStruct_withStructInputAndError(t *testing.T) {
 	user := InvalidUser{
 		Name: "InvalidUser",
@@ -107,6 +113,7 @@ func TestValidateStruct_withStructInputAndError(t *testing.T) {
 	}
 }
 
+// TestValidateStruct_withInvalidTypeInReader checks that a JSON value with the wrong type returns a plain message that names the field.
 func TestValidateStruct_withInvalidTypeInReader(t *testing.T) {
 	invalidJSON := `{"Name": "name", "Age": "not-an-integer"}`
 	v := pgValidator.New()
@@ -118,10 +125,15 @@ func TestValidateStruct_withInvalidTypeInReader(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Expected validation to fail for invalid type in JSON, got nil error")
 	}
+
+	if err["error"].Messages[0] != "JSON field 'Age' must be a number" {
+		t.Fatalf("Expected 'JSON field 'Age' must be a number', got '%s'", err["error"].Messages[0])
+	}
 }
 
+// TestValidateStruct_withInvalidJSON checks that JSON with a syntax error returns "JSON input is not valid".
 func TestValidateStruct_withInvalidJSON(t *testing.T) {
-	invalidJSON := `{"Name": "name", "Age": "not-an-integer"}`
+	invalidJSON := `{"Name": "name", invalid json}`
 	v := pgValidator.New()
 
 	reader := strings.NewReader(invalidJSON)
@@ -131,8 +143,13 @@ func TestValidateStruct_withInvalidJSON(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Expected validation to fail for invalid JSON, got nil error")
 	}
+
+	if err["error"].Messages[0] != "JSON input is not valid" {
+		t.Fatalf("Expected 'JSON input is not valid', got '%s'", err["error"].Messages[0])
+	}
 }
 
+// TestValidateStruct_withInvalidType checks that ValidateStructCtx rejects data that is neither a struct nor a reader.
 func TestValidateStruct_withInvalidType(t *testing.T) {
 	v := pgValidator.New()
 
@@ -143,6 +160,7 @@ func TestValidateStruct_withInvalidType(t *testing.T) {
 	}
 }
 
+// TestValidateStruct_withNilReader checks that ValidateStructCtx rejects nil data.
 func TestValidateStruct_withNilReader(t *testing.T) {
 	v := pgValidator.New()
 
@@ -153,6 +171,7 @@ func TestValidateStruct_withNilReader(t *testing.T) {
 	}
 }
 
+// TestValidateStruct_withNilStruct checks that ValidateStructCtx rejects a nil struct pointer.
 func TestValidateStruct_withNilStruct(t *testing.T) {
 	var user *User = nil
 	v := pgValidator.New()
@@ -164,6 +183,7 @@ func TestValidateStruct_withNilStruct(t *testing.T) {
 	}
 }
 
+// TestValidationStruct_NoValidationRuleAndValidate checks that a struct without ValidationRules or CustomValidate returns an error and no struct.
 func TestValidationStruct_NoValidationRuleAndValidate(t *testing.T) {
 	type NoValidation struct {
 		Field1 string
@@ -187,18 +207,20 @@ func TestValidationStruct_NoValidationRuleAndValidate(t *testing.T) {
 	}
 }
 
+// ValidateOnly is a struct that implements only CustomValidate, and always fails it.
 type ValidateOnly struct {
 	Field1 string
 	Field2 int
 }
 
-// implement only CustomValidate interface
+// CustomValidate always returns an "error" entry, so tests can check that ValidateStructCtx returns it.
 func (nv *ValidateOnly) CustomValidate(ctx context.Context, v *pgValidator.Validate, data *ValidateOnly, sv *StructValidator[ValidateOnly]) ValidationErrors {
 	return ValidationErrors{
 		"error": ValidationError{Field: "error", Messages: []string{"no validation rules defined"}},
 	}
 }
 
+// TestValidationStruct_OnlyValidateInterface checks that ValidateStructCtx returns the errors from a CustomValidate-only struct.
 func TestValidationStruct_OnlyValidateInterface(t *testing.T) {
 	data := ValidateOnly{
 		Field1: "test",
@@ -225,18 +247,20 @@ func TestValidationStruct_OnlyValidateInterface(t *testing.T) {
 	}
 }
 
+// CustomValidationStruct is a struct that implements both ValidationRules and CustomValidate.
 type CustomValidationStruct struct {
 	Field1 string
 	Field2 int
 }
 
-// implement both ValidationRules and Validate interfaces
+// ValidationRules declares that Field1 is required.
 func (cv *CustomValidationStruct) ValidationRules(sv *StructValidator[CustomValidationStruct]) {
 	sv.AddFieldRules("Field1", func(v *FieldValidator) {
 		v.AddRule("required", "Field1 is required")
 	})
 }
 
+// CustomValidate rejects a negative Field2, and otherwise runs the declared field rules.
 func (cv *CustomValidationStruct) CustomValidate(ctx context.Context, v *pgValidator.Validate, data *CustomValidationStruct, sv *StructValidator[CustomValidationStruct]) ValidationErrors {
 	if data.Field2 < 0 {
 		return ValidationErrors{
@@ -246,6 +270,7 @@ func (cv *CustomValidationStruct) CustomValidate(ctx context.Context, v *pgValid
 	return sv.ValidateCtx(ctx, v, data)
 }
 
+// TestValidationStruct_ValidateAndValidateInterface checks that CustomValidate runs when a struct implements both interfaces.
 func TestValidationStruct_ValidateAndValidateInterface(t *testing.T) {
 	data := CustomValidationStruct{
 		Field1: "test",
@@ -269,6 +294,7 @@ func TestValidationStruct_ValidateAndValidateInterface(t *testing.T) {
 	}
 }
 
+// TestMultiFieldValidationErrors checks that ValidateStructCtx reports every failed field when ReturnEarly is false.
 func TestMultiFieldValidationErrors(t *testing.T) {
 	user := User{
 		Name: "",
@@ -302,12 +328,13 @@ func TestMultiFieldValidationErrors(t *testing.T) {
 	}
 }
 
+// CustomValidateOnlyStruct is a struct that implements only CustomValidate.
 type CustomValidateOnlyStruct struct {
 	Field1 string
 	Field2 int
 }
 
-// implement only CustomValidate interface (no ValidationRules)
+// CustomValidate rejects a negative Field2 and accepts any other value.
 func (cv *CustomValidateOnlyStruct) CustomValidate(ctx context.Context, v *pgValidator.Validate, data *CustomValidateOnlyStruct, sv *StructValidator[CustomValidateOnlyStruct]) ValidationErrors {
 	// return validation error without validation rules
 	if data.Field2 < 0 {
@@ -321,6 +348,7 @@ func (cv *CustomValidateOnlyStruct) CustomValidate(ctx context.Context, v *pgVal
 	return nil
 }
 
+// TestValidateStruct_CustomValidateOnlyWithError checks that a failed CustomValidate-only struct returns its error and no struct.
 func TestValidateStruct_CustomValidateOnlyWithError(t *testing.T) {
 	data := CustomValidateOnlyStruct{
 		Field1: "test",
@@ -351,6 +379,7 @@ func TestValidateStruct_CustomValidateOnlyWithError(t *testing.T) {
 	}
 }
 
+// TestValidateStruct_CustomValidateOnlyWithSuccess checks that a passing CustomValidate-only struct returns the struct.
 func TestValidateStruct_CustomValidateOnlyWithSuccess(t *testing.T) {
 	data := CustomValidateOnlyStruct{
 		Field1: "test",
@@ -373,6 +402,7 @@ func TestValidateStruct_CustomValidateOnlyWithSuccess(t *testing.T) {
 	}
 }
 
+// TestValidateStruct_withPointerInput checks that ValidateStructCtx returns the same pointer for a *User input.
 func TestValidateStruct_withPointerInput(t *testing.T) {
 	user := &User{
 		Name: "name",
@@ -391,11 +421,13 @@ func TestValidateStruct_withPointerInput(t *testing.T) {
 	}
 }
 
+// CustomValidateWithRules is a struct whose CustomValidate only runs its declared field rules.
 type CustomValidateWithRules struct {
 	Field1 string
 	Field2 string
 }
 
+// ValidationRules declares that Field1 and Field2 are required.
 func (cv *CustomValidateWithRules) ValidationRules(sv *StructValidator[CustomValidateWithRules]) {
 	sv.AddFieldRules("Field1", func(v *FieldValidator) {
 		v.AddRule("required", "Field1 is required")
@@ -405,10 +437,12 @@ func (cv *CustomValidateWithRules) ValidationRules(sv *StructValidator[CustomVal
 	})
 }
 
+// CustomValidate runs the declared field rules with sv.ValidateCtx.
 func (cv *CustomValidateWithRules) CustomValidate(ctx context.Context, v *pgValidator.Validate, data *CustomValidateWithRules, sv *StructValidator[CustomValidateWithRules]) ValidationErrors {
 	return sv.ValidateCtx(ctx, v, data)
 }
 
+// TestValidateStruct_CustomValidateUsesConfig checks that sv.ValidateCtx inside CustomValidate uses the configs passed to ValidateStructCtx.
 func TestValidateStruct_CustomValidateUsesConfig(t *testing.T) {
 	v := pgValidator.New()
 
@@ -422,5 +456,45 @@ func TestValidateStruct_CustomValidateUsesConfig(t *testing.T) {
 
 	if len(valErr) != 1 {
 		t.Fatalf("Expected 1 error with default config, got %v", valErr.ToErrorMap())
+	}
+}
+
+// ReadableStruct is a struct that also implements io.Reader. Tests use it to check that it is not read as JSON.
+type ReadableStruct struct {
+	Name string
+}
+
+// Read fails, because ValidateStructCtx must check the struct and must not read it.
+func (r *ReadableStruct) Read([]byte) (int, error) {
+	return 0, errors.New("Read must not be called")
+}
+
+// ValidationRules declares that Name is required.
+func (r *ReadableStruct) ValidationRules(sv *StructValidator[ReadableStruct]) {
+	sv.AddFieldRules("Name", func(v *FieldValidator) {
+		v.Required("Name is required")
+	})
+}
+
+// TestValidateStruct_StructWithReadMethod checks that a struct with a Read method is validated as a struct, and that a nil pointer to it is rejected.
+func TestValidateStruct_StructWithReadMethod(t *testing.T) {
+	v := pgValidator.New()
+
+	data := &ReadableStruct{Name: "name"}
+	validated, valErr := ValidateStructCtx[ReadableStruct](t.Context(), v, data)
+
+	if valErr != nil {
+		t.Fatalf("Expected the struct to be validated as a struct, got %v", valErr.ToErrorMap())
+	}
+
+	if validated != data {
+		t.Fatalf("Expected the same pointer to be returned")
+	}
+
+	var nilData *ReadableStruct
+	_, valErr = ValidateStructCtx[ReadableStruct](t.Context(), v, nilData)
+
+	if valErr == nil {
+		t.Fatalf("Expected validation to fail for nil pointer, got nil")
 	}
 }

@@ -1,3 +1,4 @@
+// The cmd program shows how to use go-schema-validator for single values and structs.
 package main
 
 import (
@@ -8,6 +9,7 @@ import (
 	"github.com/iambpn/go-schema-validator/v3/validator"
 )
 
+// main runs the example: it checks single values and a struct, and prints the error messages.
 func main() {
 	ctx := context.Background()
 	v := pgValidator.New()

@@ -15,11 +15,11 @@ This library wraps go-playground/validator with a small, fluent API. You describ
 - Configurable error aggregation (stop on the first failing field or collect one error per failing field)
 - Structured error reporting with `ValidationError`/`ValidationErrors`
 - Interfaces for declarative rules and custom validation hooks
-- Panic-safe single-value validation (recovers and surfaces errors)
+- Setup bugs, such as a misspelled field name or a bad rule, panic at once instead of reaching your users
 
 ## Installation
 
-Prerequisites: Go 1.25 or newer.
+Prerequisites: Go 1.24 or newer.
 
 ```bash
 go get github.com/iambpn/go-schema-validator/v3
@@ -196,6 +196,32 @@ errs := userValidator.ValidateCtx(ctx, v, &candidate, config.SetReturnEarly(fals
 
 Fields are validated in the order they were added. With `SetReturnEarly(false)` every failing field is reported, and each field reports the message of its first failed rule.
 
+### 6) Error messages
+
+- If a rule has a custom message, a failure of that rule returns that message.
+- If a rule has no custom message, a failure returns a default message:
+  - For a struct field: `field 'Name' failed 'required' validation`. For a list item, the message shows its index, such as `field 'Tags[1]' failed 'min' validation`.
+  - For a single value: `value failed 'min' validation`.
+- `AddRule("required,min=3", "message")` adds two rules. Each rule gets the same message.
+- Rules after `dive` check the items of a list or map. Each rule keeps its own message, so `AddRule("min=1", "need one tag").AddRule("dive").AddRule("min=3", "each tag needs 3 characters")` returns the right message for each case.
+- Bad JSON input returns one message under the `"error"` key. The messages do not show Go type names:
+  - `JSON input is empty`
+  - `JSON input is not valid`
+  - `JSON input must contain only one value`
+  - `JSON input must be an object`
+  - `JSON field 'Age' must be a number`
+  - `JSON field 'Small' has a number that is not allowed`
+  - `JSON input could not be decoded` (for reader errors and for values that a field type rejects, such as a bad `time.Time` value)
+
+### 7) Setup bugs panic
+
+These mistakes are bugs in your code, so the library panics instead of returning a validation error to your users:
+
+- `AddFieldRules` panics if `T` is not a struct type, or if `T` has no exported field with the given name.
+- `ValidateFieldCtx` and the struct methods panic if a rule is not valid, such as `min=abc`, or if the go-playground validator is `nil`.
+
+Write a test that runs your validation once, so these panics show up before you deploy.
+
 ## Exposed APIs
 
 In the signatures below, `pgValidator` refers to `github.com/go-playground/validator/v10`.
@@ -203,14 +229,14 @@ In the signatures below, `pgValidator` refers to `github.com/go-playground/valid
 ### Field validation
 
 - `validator.New() *FieldValidator` — create a rule builder for scalar values
-- `(*FieldValidator).AddRule(tag string, message ...string) *FieldValidator` — attach a go-playground tag with an optional message
+- `(*FieldValidator).AddRule(tag string, message ...string) *FieldValidator` — attach a go-playground tag with an optional message. A tag with commas, such as `required,min=3`, adds one rule for each part, and each part gets the message
 - Helper shortcuts: `Required`, `Email`, `Min`, `Max`, `Length`, `Optional` (adds `omitempty` before the other rules), `URL`, `UUID`, `IsNumber`, `IsBoolean`
-- `(*FieldValidator).ValidateFieldCtx(ctx context.Context, v *pgValidator.Validate, value any) error` — run rules against a single value (panic-safe)
+- `(*FieldValidator).ValidateFieldCtx(ctx context.Context, v *pgValidator.Validate, value any) error` — run rules against a single value (panics if a rule is not valid)
 
 ### Struct validation
 
 - `validator.NewStruct[T any]() *StructValidator[T]` — build validations for struct types
-- `(*StructValidator[T]).AddFieldRules(name string, fn func(*FieldValidator)) *StructValidator[T]` — register rules for a struct field
+- `(*StructValidator[T]).AddFieldRules(name string, fn func(*FieldValidator)) *StructValidator[T]` — register rules for a struct field (panics if `T` has no exported field called `name`)
 - `(*StructValidator[T]).ValidateCtx(ctx context.Context, v *pgValidator.Validate, structPtr *T, configs ...config.Config) ValidationErrors` — validate a struct instance
 - `(*StructValidator[T]).ValidateAnyCtx(ctx context.Context, v *pgValidator.Validate, value any, configs ...config.Config) (*T, ValidationErrors)` — validate a value that is a `T` or a `*T`
 - `(*StructValidator[T]).ValidateIOReaderCtx(ctx context.Context, v *pgValidator.Validate, reader io.Reader, configs ...config.Config) (*T, ValidationErrors)` — decode one JSON value from a reader and validate it (extra data after the value is an error)

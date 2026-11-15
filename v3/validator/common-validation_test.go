@@ -6,6 +6,7 @@ import (
 	pgValidator "github.com/go-playground/validator/v10"
 )
 
+// TestIsNumber checks that IsNumber adds the "number" rule and accepts a numeric string and an integer.
 func TestIsNumber(t *testing.T) {
 	s := New().IsNumber("Must be a number")
 	v := pgValidator.New()
@@ -28,6 +29,7 @@ func TestIsNumber(t *testing.T) {
 	}
 }
 
+// TestMin checks that Min rejects a string shorter than the limit and accepts a longer one.
 func TestMin(t *testing.T) {
 	s := New().Min(10, "Must be at least 10 characters")
 	v := pgValidator.New()
@@ -46,6 +48,7 @@ func TestMin(t *testing.T) {
 	}
 }
 
+// TestMax checks that Max accepts a string within the limit and rejects a longer one.
 func TestMax(t *testing.T) {
 	s := New().Max(10, "Must be at most 10 characters")
 	v := pgValidator.New()
@@ -64,6 +67,7 @@ func TestMax(t *testing.T) {
 	}
 }
 
+// TestRequired checks that Required rejects an empty string and accepts a non-empty one.
 func TestRequired(t *testing.T) {
 	s := New().Required("This field is required")
 	v := pgValidator.New()
@@ -82,6 +86,7 @@ func TestRequired(t *testing.T) {
 	}
 }
 
+// TestEmail checks that Email rejects a bad address and accepts a valid one.
 func TestEmail(t *testing.T) {
 	s := New().Email("Must be a valid email")
 	v := pgValidator.New()
@@ -100,6 +105,7 @@ func TestEmail(t *testing.T) {
 	}
 }
 
+// TestIsBoolean checks that IsBoolean rejects a non-boolean string and accepts true and false.
 func TestIsBoolean(t *testing.T) {
 	s := New().IsBoolean("Must be a boolean")
 	v := pgValidator.New()
@@ -124,6 +130,7 @@ func TestIsBoolean(t *testing.T) {
 	}
 }
 
+// TestOptional checks that Optional accepts empty, zero, and non-empty values.
 func TestOptional(t *testing.T) {
 	s := New().Optional()
 	v := pgValidator.New()
@@ -150,6 +157,7 @@ func TestOptional(t *testing.T) {
 	}
 }
 
+// TestURL checks that URL rejects a bad URL and accepts simple and complex valid URLs.
 func TestURL(t *testing.T) {
 	s := New().URL("Must be a valid URL")
 	v := pgValidator.New()
@@ -174,6 +182,7 @@ func TestURL(t *testing.T) {
 	}
 }
 
+// TestUUID checks that UUID rejects a bad value and accepts a valid UUID.
 func TestUUID(t *testing.T) {
 	s := New().UUID("Must be a valid UUID")
 	v := pgValidator.New()
@@ -194,6 +203,7 @@ func TestUUID(t *testing.T) {
 	}
 }
 
+// TestLength checks that Length accepts only a string with exactly the given length.
 func TestLength(t *testing.T) {
 	s := New().Length(5, "Must be exactly 5 characters")
 	v := pgValidator.New()
@@ -218,6 +228,7 @@ func TestLength(t *testing.T) {
 	}
 }
 
+// TestOptional_AfterOtherRules checks that Optional skips the other rules for an empty value, even when it is added last.
 func TestOptional_AfterOtherRules(t *testing.T) {
 	s := New().Email("Must be a valid email").Optional()
 	v := pgValidator.New()

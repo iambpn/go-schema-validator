@@ -2,12 +2,12 @@ package validator
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	pgValidator "github.com/go-playground/validator/v10"
 )
 
+// TestNew checks that New returns a FieldValidator.
 func TestNew(t *testing.T) {
 	schema := New()
 
@@ -16,6 +16,7 @@ func TestNew(t *testing.T) {
 	}
 }
 
+// TestAddRule checks that AddRule stores the rule and only the first message.
 func TestAddRule(t *testing.T) {
 	schema := New()
 
@@ -30,6 +31,7 @@ func TestAddRule(t *testing.T) {
 	}
 }
 
+// TestCompileRules checks that compileRules joins the rules with commas.
 func TestCompileRules(t *testing.T) {
 	schema := New()
 
@@ -44,6 +46,7 @@ func TestCompileRules(t *testing.T) {
 	}
 }
 
+// TestValidatorValidate checks that ValidateFieldCtx passes without rules, and returns errors as rules are added.
 func TestValidatorValidate(t *testing.T) {
 	v := pgValidator.New()
 	schema := New()
@@ -90,7 +93,7 @@ func TestValidatorValidate(t *testing.T) {
 	}
 }
 
-// when no custom message is provided, the default message for the failing tag should be returned.
+// TestValidate_DefaultMessage checks the default message for a failed rule without a custom message.
 func TestValidate_DefaultMessage(t *testing.T) {
 	schema := New()
 	v := pgValidator.New()
@@ -102,96 +105,91 @@ func TestValidate_DefaultMessage(t *testing.T) {
 		t.Fatalf("Expected error for value shorter than min, got nil")
 	}
 
-	// default message includes the tag name; ensure it mentions the failing tag
-	if !strings.Contains(err.Error(), "failed 'min' validation") && !strings.Contains(err.Error(), "min") {
-		t.Errorf("Expected default error to mention 'min' validation, got: %v", err.Error())
+	expected := "value failed 'min' validation"
+	if err.Error() != expected {
+		t.Errorf("Expected default error '%s', got: %v", expected, err)
 	}
 }
 
-// Validate should recover from panics and return an error containing "validation failed".
-func TestValidate_PanicRecovered(t *testing.T) {
-	fv := New()
+// assertPanics fails the test unless run panics.
+func assertPanics(t *testing.T, run func()) {
+	t.Helper()
+
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("Expected a panic, got none")
+		}
+	}()
+
+	run()
+}
+
+// TestValidate_PanicsOnNilValidator checks that ValidateFieldCtx panics when the go-playground validator is nil.
+func TestValidate_PanicsOnNilValidator(t *testing.T) {
+	fv := New().AddRule("required")
 	var v *pgValidator.Validate
 
-	// ensure Validate actually invokes the underlying validator by adding a rule
-	fv.AddRule("required")
-
-	err := fv.ValidateFieldCtx(t.Context(), v, "anything")
-
-	if err == nil {
-		t.Fatalf("Expected error when underlying validator panics, got nil")
-	}
-
-	if !strings.Contains(err.Error(), "validation failed") {
-		t.Errorf("Expected error message to contain 'validation failed', got: %v", err.Error())
-	}
+	assertPanics(t, func() {
+		_ = fv.ValidateFieldCtx(t.Context(), v, "anything")
+	})
 }
 
-// Test fallback error message when no matching rule is found
-func TestValidate_FallbackErrorMessage(t *testing.T) {
+// TestValidate_PanicsOnInvalidRule checks that ValidateFieldCtx panics for a rule with a bad parameter.
+func TestValidate_PanicsOnInvalidRule(t *testing.T) {
+	fv := New().AddRule("min=abc", "custom message")
+	v := pgValidator.New()
+
+	assertPanics(t, func() {
+		_ = fv.ValidateFieldCtx(t.Context(), v, "anything")
+	})
+}
+
+// TestValidate_ReturnsMessageOfFailedRule checks that the custom message of the failed rule is returned, not the message of another rule.
+func TestValidate_ReturnsMessageOfFailedRule(t *testing.T) {
 	fv := New()
 	fv.AddRule("min=5", "custom min message")
 	fv.AddRule("max=10", "custom max message")
 
 	v := pgValidator.New()
 
-	// validate a string that triggers an error but with a rule tag that doesn't match any configured rules
 	err := fv.ValidateFieldCtx(t.Context(), v, "ab")
 
-	if err == nil {
-		t.Fatalf("Expected error for value shorter than min, got nil")
-	}
-
-	// the error should contain either the custom message or a default fallback
-	if !strings.Contains(err.Error(), "custom min message") && !strings.Contains(err.Error(), "validation failed") {
-		t.Errorf("Expected error to contain custom message or fallback, got: %v", err.Error())
+	if err == nil || err.Error() != "custom min message" {
+		t.Errorf("Expected 'custom min message', got: %v", err)
 	}
 }
 
-// Test generic error handling when validation returns non-ValidationErrors type
-func TestValidate_GenericErrorHandling(t *testing.T) {
+// TestValidate_DefaultMessageForNonStringValue checks the default message when the email rule fails for a number.
+func TestValidate_DefaultMessageForNonStringValue(t *testing.T) {
 	fv := New()
 	fv.AddRule("email")
 
 	v := pgValidator.New()
 
-	// pass an invalid type that cannot be validated with 'email' rule
-	// this should trigger error handling
 	err := fv.ValidateFieldCtx(t.Context(), v, 12345)
 
-	if err == nil {
-		t.Fatalf("Expected error for invalid email type, got nil")
-	}
-
-	// error should mention validation failure
-	errMsg := err.Error()
-	if !strings.Contains(errMsg, "validation failed") && !strings.Contains(errMsg, "email") {
-		t.Errorf("Expected error to contain 'validation failed' or 'email', got: %v", errMsg)
+	expected := "value failed 'email' validation"
+	if err == nil || err.Error() != expected {
+		t.Errorf("Expected '%s', got: %v", expected, err)
 	}
 }
 
-// Test no matching rule scenario - add a rule with custom message but trigger a different validation error
-func TestValidate_NoMatchingRuleError(t *testing.T) {
+// TestValidate_ReturnsCustomMaxMessage checks that a failed max rule returns its custom message.
+func TestValidate_ReturnsCustomMaxMessage(t *testing.T) {
 	fv := New()
 	// only add custom message for 'max' rule
 	fv.AddRule("max=5", "custom max message")
 
 	v := pgValidator.New()
 
-	// validate with 'min' rule which has no custom message defined
-	// but the value will fail 'max' so should return the custom message
 	err := fv.ValidateFieldCtx(t.Context(), v, "toolongstring")
 
-	if err == nil {
-		t.Fatalf("Expected error for value exceeding max, got nil")
-	}
-
-	// should return the custom message for the matching rule
-	if !strings.Contains(err.Error(), "custom max message") {
-		t.Errorf("Expected error to contain 'custom max message', got: %v", err.Error())
+	if err == nil || err.Error() != "custom max message" {
+		t.Errorf("Expected 'custom max message', got: %v", err)
 	}
 }
 
+// TestValidate_MessageMatchesExactRule checks that a rule name that starts with another rule name, such as lte and lt, gets the right message.
 func TestValidate_MessageMatchesExactRule(t *testing.T) {
 	v := pgValidator.New()
 
@@ -215,6 +213,7 @@ func TestValidate_MessageMatchesExactRule(t *testing.T) {
 	}
 }
 
+// TestValidate_MessageForOrRule checks that a rule joined with "|" returns its custom message.
 func TestValidate_MessageForOrRule(t *testing.T) {
 	v := pgValidator.New()
 
@@ -224,5 +223,97 @@ func TestValidate_MessageForOrRule(t *testing.T) {
 
 	if err == nil || err.Error() != "must be a or b" {
 		t.Errorf("Expected 'must be a or b', got: %v", err)
+	}
+}
+
+// TestAddRule_SplitsCommaSeparatedRules checks that AddRule splits a comma-separated rule string and gives each rule the message.
+func TestAddRule_SplitsCommaSeparatedRules(t *testing.T) {
+	schema := New().AddRule("required,min=3", "custom message")
+
+	if len(schema.fieldRules) != 2 {
+		t.Fatalf("Expected 2 rules, got %v", schema.fieldRules)
+	}
+
+	for _, rule := range schema.fieldRules {
+		if rule.message != "custom message" {
+			t.Errorf("Expected each rule to keep the custom message, got %v", schema.fieldRules)
+		}
+	}
+}
+
+// TestValidate_MessageForCommaSeparatedRules checks that a comma-separated rule string returns its custom message.
+func TestValidate_MessageForCommaSeparatedRules(t *testing.T) {
+	v := pgValidator.New()
+
+	err := New().
+		AddRule("required,min=3", "custom message").
+		ValidateFieldCtx(t.Context(), v, "ab")
+
+	if err == nil || err.Error() != "custom message" {
+		t.Errorf("Expected 'custom message', got: %v", err)
+	}
+}
+
+// TestValidate_MessageForSameRuleNameWithDifferentParams checks that two rules with the same name, such as min=2 and min=4, each get their own message.
+func TestValidate_MessageForSameRuleNameWithDifferentParams(t *testing.T) {
+	v := pgValidator.New()
+
+	err := New().
+		Min(2, "min 2 message").
+		Max(5, "max message").
+		Min(4, "min 4 message").
+		ValidateFieldCtx(t.Context(), v, "abc")
+
+	if err == nil || err.Error() != "min 4 message" {
+		t.Errorf("Expected 'min 4 message', got: %v", err)
+	}
+}
+
+// TestValidate_MessageForDiveRules checks that a rule before "dive" and a rule after it each get their own message.
+func TestValidate_MessageForDiveRules(t *testing.T) {
+	v := pgValidator.New()
+
+	schema := New().
+		AddRule("min=1", "need at least one tag").
+		AddRule("dive").
+		AddRule("min=3", "each tag needs 3 characters")
+
+	err := schema.ValidateFieldCtx(t.Context(), v, []string{})
+
+	if err == nil || err.Error() != "need at least one tag" {
+		t.Errorf("Expected 'need at least one tag', got: %v", err)
+	}
+
+	err = schema.ValidateFieldCtx(t.Context(), v, []string{"abc", "ab"})
+
+	if err == nil || err.Error() != "each tag needs 3 characters" {
+		t.Errorf("Expected 'each tag needs 3 characters', got: %v", err)
+	}
+}
+
+// TestValidate_DefaultMessageForDiveItem checks that the default message for a list item shows the item index.
+func TestValidate_DefaultMessageForDiveItem(t *testing.T) {
+	v := pgValidator.New()
+
+	err := New().
+		AddRule("dive,min=3").
+		ValidateFieldCtx(t.Context(), v, []string{"abc", "ab"})
+
+	expected := "value[1] failed 'min' validation"
+	if err == nil || err.Error() != expected {
+		t.Errorf("Expected '%s', got: %v", expected, err)
+	}
+}
+
+// TestValidate_MessageForEscapedParam checks that a rule with an escaped comma in its parameter returns its custom message.
+func TestValidate_MessageForEscapedParam(t *testing.T) {
+	v := pgValidator.New()
+
+	err := New().
+		AddRule("contains=0x2C", "must contain a comma").
+		ValidateFieldCtx(t.Context(), v, "no comma")
+
+	if err == nil || err.Error() != "must contain a comma" {
+		t.Errorf("Expected 'must contain a comma', got: %v", err)
 	}
 }

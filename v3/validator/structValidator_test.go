@@ -2,19 +2,24 @@ package validator
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	pgValidator "github.com/go-playground/validator/v10"
 	"github.com/iambpn/go-schema-validator/v3/config"
 )
 
+// User is the struct that most tests validate.
 type User struct {
 	Name string
 	Age  int
 }
 
+// TestField checks that AddFieldRules stores one rule set for each field.
 func TestField(t *testing.T) {
 	structVal := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -44,6 +49,7 @@ func TestField(t *testing.T) {
 	}
 }
 
+// assertFirstErrorMessage validates val with sv and fails the test unless field has the error message errMsg.
 func assertFirstErrorMessage[T any](val *T, sv *StructValidator[T], v *pgValidator.Validate, field string, errMsg string, t *testing.T) {
 	t.Helper()
 
@@ -66,6 +72,7 @@ func assertFirstErrorMessage[T any](val *T, sv *StructValidator[T], v *pgValidat
 	}
 }
 
+// TestStructValidatorValidateChainedRules checks that each field returns the message of its first failed rule.
 func TestStructValidatorValidateChainedRules(t *testing.T) {
 	structVal := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -103,6 +110,7 @@ func TestStructValidatorValidateChainedRules(t *testing.T) {
 	}, &structVal, v, ageField, ageGt18Message, t)
 }
 
+// TestStructValidatorValidate checks that ValidateCtx accepts a valid User and returns the right message for each failed field.
 func TestStructValidatorValidate(t *testing.T) {
 	structVal := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -152,6 +160,7 @@ func TestStructValidatorValidate(t *testing.T) {
 	assertFirstErrorMessage(&noAgeUser, &structVal, v, ageField, ageGt18Message, t)
 }
 
+// TestNewStruct checks that NewStruct returns a *StructValidator.
 func TestNewStruct(t *testing.T) {
 	schema := NewStruct[User]()
 
@@ -164,6 +173,7 @@ func TestNewStruct(t *testing.T) {
 	}
 }
 
+// TestValidateAnySuccess checks that ValidateAnyCtx accepts a valid struct value and returns an equal struct.
 func TestValidateAnySuccess(t *testing.T) {
 	structVal := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -186,6 +196,7 @@ func TestValidateAnySuccess(t *testing.T) {
 	}
 }
 
+// TestValidateStruct_NonStruct checks that ValidateCtx returns an "error" entry when T is not a struct type.
 func TestValidateStruct_NonStruct(t *testing.T) {
 	sv := StructValidator[any]{
 		rules: make(map[string]*FieldValidator),
@@ -198,26 +209,29 @@ func TestValidateStruct_NonStruct(t *testing.T) {
 	assertFirstErrorMessage(&anyValue, &sv, v, "error", expected, t)
 }
 
-func TestValidateStruct_FieldDoesNotExist(t *testing.T) {
-	sv := StructValidator[User]{
-		rules: make(map[string]*FieldValidator),
-	}
-	v := pgValidator.New()
+// TestAddFieldRules_PanicsForUnknownField checks that AddFieldRules panics for a field name that User does not have.
+func TestAddFieldRules_PanicsForUnknownField(t *testing.T) {
+	sv := NewStruct[User]()
 
-	// add a rule for a non-existing field
-	sv.AddFieldRules("UnknownField", func(v *FieldValidator) {
-		v.AddRule("required", "UnknownField is required")
+	assertPanics(t, func() {
+		sv.AddFieldRules("UnknownField", func(v *FieldValidator) {
+			v.AddRule("required", "UnknownField is required")
+		})
 	})
-
-	expected := "field UnknownField does not exist"
-	usr := &User{
-		Name: "John",
-		Age:  30,
-	}
-
-	assertFirstErrorMessage(usr, &sv, v, "UnknownField", expected, t)
 }
 
+// TestAddFieldRules_PanicsForNonStructType checks that AddFieldRules panics when T is not a struct type.
+func TestAddFieldRules_PanicsForNonStructType(t *testing.T) {
+	sv := NewStruct[string]()
+
+	assertPanics(t, func() {
+		sv.AddFieldRules("Name", func(v *FieldValidator) {
+			v.AddRule("required")
+		})
+	})
+}
+
+// TestValidateStruct_PointerInput checks that ValidateCtx accepts a pointer to a valid struct.
 func TestValidateStruct_PointerInput(t *testing.T) {
 	sv := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -241,6 +255,7 @@ func TestValidateStruct_PointerInput(t *testing.T) {
 	}
 }
 
+// TestValidateStruct_IoReaderInput checks that ValidateIOReaderCtx decodes valid JSON and returns an equal struct.
 func TestValidateStruct_IoReaderInput(t *testing.T) {
 	sv := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -275,6 +290,7 @@ func TestValidateStruct_IoReaderInput(t *testing.T) {
 	}
 }
 
+// TestValidateStructMultipleErrors checks that ReturnEarly set to false returns one error for each failed field.
 func TestValidateStructMultipleErrors(t *testing.T) {
 	sv := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -320,6 +336,7 @@ func TestValidateStructMultipleErrors(t *testing.T) {
 	}
 }
 
+// TestValidateValidationErrorsToMap checks that ToErrorMap returns the messages of each failed field.
 func TestValidateValidationErrorsToMap(t *testing.T) {
 	sv := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -360,38 +377,7 @@ func TestValidateValidationErrorsToMap(t *testing.T) {
 	}
 }
 
-func TestValidateStruct_ReturnEarlyOnFieldMissing(t *testing.T) {
-	sv := StructValidator[User]{
-		rules: make(map[string]*FieldValidator),
-	}
-	v := pgValidator.New()
-
-	// add rule for a non-existing field
-	sv.AddFieldRules("NonExistentField", func(v *FieldValidator) {
-		v.AddRule("required", "NonExistentField is required")
-	})
-
-	user := User{
-		Name: "John",
-		Age:  30,
-	}
-
-	// with ReturnEarly=true, should stop at first error (non-existent field)
-	valErrs := sv.ValidateCtx(t.Context(), v, &user, config.SetReturnEarly(true))
-
-	if valErrs == nil {
-		t.Fatalf("Expected validation to fail with non-existent field, got nil")
-	}
-
-	if len(valErrs) != 1 {
-		t.Fatalf("Expected 1 error with ReturnEarly=true, got %d", len(valErrs))
-	}
-
-	if valErrs["NonExistentField"].Field != "NonExistentField" {
-		t.Fatalf("Expected error field 'NonExistentField', got '%s'", valErrs["NonExistentField"].Field)
-	}
-}
-
+// TestValidateStruct_ReturnEarlyOnValidationError checks that ReturnEarly set to true returns only the first failed field.
 func TestValidateStruct_ReturnEarlyOnValidationError(t *testing.T) {
 	sv := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -429,6 +415,7 @@ func TestValidateStruct_ReturnEarlyOnValidationError(t *testing.T) {
 	}
 }
 
+// TestValidateStruct_ReturnEarlyFalseCollectsAllErrors checks that ReturnEarly set to false returns errors for all failed fields.
 func TestValidateStruct_ReturnEarlyFalseCollectsAllErrors(t *testing.T) {
 	sv := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -469,6 +456,7 @@ func TestValidateStruct_ReturnEarlyFalseCollectsAllErrors(t *testing.T) {
 	}
 }
 
+// TestValidateIOReaderCtx_WithValidationError checks that ValidateIOReaderCtx returns field errors and no struct for valid JSON with bad values.
 func TestValidateIOReaderCtx_WithValidationError(t *testing.T) {
 	sv := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -502,6 +490,7 @@ func TestValidateIOReaderCtx_WithValidationError(t *testing.T) {
 	}
 }
 
+// TestValidateIOReaderCtx_WithValidJSON checks that ValidateIOReaderCtx returns the decoded struct for valid JSON with good values.
 func TestValidateIOReaderCtx_WithValidJSON(t *testing.T) {
 	sv := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -534,6 +523,7 @@ func TestValidateIOReaderCtx_WithValidJSON(t *testing.T) {
 	}
 }
 
+// TestValidateIOReaderCtx_WithInvalidJSON checks that ValidateIOReaderCtx returns "JSON input is not valid" for a syntax error.
 func TestValidateIOReaderCtx_WithInvalidJSON(t *testing.T) {
 	sv := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -562,11 +552,12 @@ func TestValidateIOReaderCtx_WithInvalidJSON(t *testing.T) {
 		t.Fatalf("Expected at least 1 error, got 0")
 	}
 
-	if !strings.Contains(err["error"].Messages[0], "failed to decode") {
-		t.Fatalf("Expected error to mention decoding failure, got '%s'", err["error"].Messages[0])
+	if err["error"].Messages[0] != "JSON input is not valid" {
+		t.Fatalf("Expected 'JSON input is not valid', got '%s'", err["error"].Messages[0])
 	}
 }
 
+// TestValidateAnyCtx_WithInvalidStruct checks that ValidateAnyCtx returns field errors and no struct for a struct with bad values.
 func TestValidateAnyCtx_WithInvalidStruct(t *testing.T) {
 	sv := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -600,6 +591,7 @@ func TestValidateAnyCtx_WithInvalidStruct(t *testing.T) {
 	}
 }
 
+// TestValidateStruct_ReturnEarlyWithFieldValidationError checks that ReturnEarly set to true returns one error when one field fails.
 func TestValidateStruct_ReturnEarlyWithFieldValidationError(t *testing.T) {
 	sv := StructValidator[User]{
 		rules: make(map[string]*FieldValidator),
@@ -629,52 +621,24 @@ func TestValidateStruct_ReturnEarlyWithFieldValidationError(t *testing.T) {
 	}
 }
 
+// userWithUnexportedField is a struct with an unexported field. Tests use it to check that rules for that field are refused.
 type userWithUnexportedField struct {
 	Name string
 	age  int
 }
 
-func TestValidateStruct_FieldMissingWithReturnEarlyFalse(t *testing.T) {
-	v := pgValidator.New()
+// TestAddFieldRules_PanicsForUnexportedField checks that AddFieldRules panics for an unexported field.
+func TestAddFieldRules_PanicsForUnexportedField(t *testing.T) {
+	sv := NewStruct[userWithUnexportedField]()
 
-	sv := NewStruct[User]().
-		AddFieldRules("UnknownField", func(v *FieldValidator) {
-			v.AddRule("required", "UnknownField is required")
-		}).
-		AddFieldRules("Name", func(v *FieldValidator) {
-			v.AddRule("required", "Name is required")
-		})
-
-	// should report the missing field and keep validating the other fields
-	valErrs := sv.ValidateCtx(t.Context(), v, &User{}, config.SetReturnEarly(false))
-
-	if len(valErrs) != 2 {
-		t.Fatalf("Expected 2 errors, got %v", valErrs.ToErrorMap())
-	}
-
-	expected := "field UnknownField does not exist"
-	if valErrs["UnknownField"].Messages[0] != expected {
-		t.Fatalf("Expected error message '%s', got '%s'", expected, valErrs["UnknownField"].Messages[0])
-	}
-
-	if valErrs["Name"].Messages[0] != "Name is required" {
-		t.Fatalf("Expected error message 'Name is required', got '%s'", valErrs["Name"].Messages[0])
-	}
-}
-
-func TestValidateStruct_UnexportedField(t *testing.T) {
-	v := pgValidator.New()
-
-	sv := NewStruct[userWithUnexportedField]().
-		AddFieldRules("age", func(v *FieldValidator) {
+	assertPanics(t, func() {
+		sv.AddFieldRules("age", func(v *FieldValidator) {
 			v.AddRule("min=18", "age must be at least 18")
 		})
-
-	user := userWithUnexportedField{Name: "John", age: 10}
-
-	assertFirstErrorMessage(&user, sv, v, "age", "field age is not exported", t)
+	})
 }
 
+// TestValidateStruct_ReturnEarlyFollowsFieldOrder checks that ReturnEarly always reports the first added field, not a random one.
 func TestValidateStruct_ReturnEarlyFollowsFieldOrder(t *testing.T) {
 	v := pgValidator.New()
 
@@ -700,6 +664,7 @@ func TestValidateStruct_ReturnEarlyFollowsFieldOrder(t *testing.T) {
 	}
 }
 
+// TestAddFieldRules_SameFieldTwiceReplacesRules checks that a second AddFieldRules call for a field replaces its rules and keeps one position.
 func TestAddFieldRules_SameFieldTwiceReplacesRules(t *testing.T) {
 	v := pgValidator.New()
 
@@ -718,6 +683,7 @@ func TestAddFieldRules_SameFieldTwiceReplacesRules(t *testing.T) {
 	assertFirstErrorMessage(&User{}, sv, v, "Name", "second message", t)
 }
 
+// TestValidateAnyCtx_UsesConfig checks that ValidateAnyCtx passes its configs to ValidateCtx.
 func TestValidateAnyCtx_UsesConfig(t *testing.T) {
 	v := pgValidator.New()
 
@@ -736,6 +702,7 @@ func TestValidateAnyCtx_UsesConfig(t *testing.T) {
 	}
 }
 
+// TestValidateIOReaderCtx_UsesConfig checks that ValidateIOReaderCtx passes its configs to ValidateCtx.
 func TestValidateIOReaderCtx_UsesConfig(t *testing.T) {
 	v := pgValidator.New()
 
@@ -754,6 +721,7 @@ func TestValidateIOReaderCtx_UsesConfig(t *testing.T) {
 	}
 }
 
+// TestValidateAnyCtx_WithPointer checks that ValidateAnyCtx returns the same pointer for a *User input and rejects a nil pointer.
 func TestValidateAnyCtx_WithPointer(t *testing.T) {
 	v := pgValidator.New()
 
@@ -782,6 +750,7 @@ func TestValidateAnyCtx_WithPointer(t *testing.T) {
 	}
 }
 
+// TestValidateIOReaderCtx_WithTrailingData checks that extra data after the JSON value is rejected, and that trailing whitespace is allowed.
 func TestValidateIOReaderCtx_WithTrailingData(t *testing.T) {
 	v := pgValidator.New()
 
@@ -796,8 +765,8 @@ func TestValidateIOReaderCtx_WithTrailingData(t *testing.T) {
 		t.Fatalf("Expected validation to fail for data after the JSON value, got nil")
 	}
 
-	if !strings.Contains(valErrs["error"].Messages[0], "failed to decode") {
-		t.Fatalf("Expected decode error, got: %v", valErrs["error"].Messages[0])
+	if valErrs["error"].Messages[0] != "JSON input must contain only one value" {
+		t.Fatalf("Expected 'JSON input must contain only one value', got: %v", valErrs["error"].Messages[0])
 	}
 
 	// whitespace after the JSON value is allowed
@@ -805,5 +774,123 @@ func TestValidateIOReaderCtx_WithTrailingData(t *testing.T) {
 
 	if valErrs != nil {
 		t.Fatalf("Expected no error for trailing whitespace, got %v", valErrs.ToErrorMap())
+	}
+}
+
+// TestValidateStruct_DefaultMessageNamesField checks that the default message of a struct field names the field.
+func TestValidateStruct_DefaultMessageNamesField(t *testing.T) {
+	v := pgValidator.New()
+
+	sv := NewStruct[User]().
+		AddFieldRules("Name", func(v *FieldValidator) {
+			v.Required()
+		})
+
+	assertFirstErrorMessage(&User{}, sv, v, "Name", "field 'Name' failed 'required' validation", t)
+}
+
+// Address is a struct that tests embed in other structs.
+type Address struct {
+	City string
+}
+
+// userWithAddress is a struct with an embedded *Address, so its City field is promoted.
+type userWithAddress struct {
+	Name string
+	*Address
+}
+
+// TestValidateStruct_PromotedFieldOfEmbeddedStruct checks that rules work on a promoted field, and that a nil embedded pointer gives a validation error instead of a panic.
+func TestValidateStruct_PromotedFieldOfEmbeddedStruct(t *testing.T) {
+	v := pgValidator.New()
+
+	sv := NewStruct[userWithAddress]().
+		AddFieldRules("City", func(v *FieldValidator) {
+			v.Required("City is required")
+		})
+
+	valErrs := sv.ValidateCtx(t.Context(), v, &userWithAddress{Address: &Address{City: "Paris"}})
+
+	if valErrs != nil {
+		t.Fatalf("Expected no error, got %v", valErrs.ToErrorMap())
+	}
+
+	// a nil embedded pointer gives the rules a nil value instead of a panic
+	assertFirstErrorMessage(&userWithAddress{}, sv, v, "City", "City is required", t)
+}
+
+// failingReader is an io.Reader that always fails, like a broken network connection.
+type failingReader struct{}
+
+// Read always returns an error.
+func (failingReader) Read([]byte) (int, error) {
+	return 0, errors.New("connection reset")
+}
+
+// userWithDetails is a struct with several field types, so tests can trigger each kind of JSON error.
+type userWithDetails struct {
+	Name      string
+	Small     int8
+	CreatedAt time.Time
+	Address   Address
+}
+
+// TestValidateIOReaderCtx_JSONErrorMessages checks the plain message for each kind of bad JSON input.
+func TestValidateIOReaderCtx_JSONErrorMessages(t *testing.T) {
+	v := pgValidator.New()
+	sv := NewStruct[userWithDetails]()
+
+	tests := []struct {
+		name     string
+		reader   io.Reader
+		expected string
+	}{
+		{"wrong type", strings.NewReader(`{"Name": 5}`), "JSON field 'Name' must be a string"},
+		{"wrong nested type", strings.NewReader(`{"Address": {"City": 5}}`), "JSON field 'Address.City' must be a string"},
+		{"wrong type for whole input", strings.NewReader(`[1]`), "JSON input must be an object"},
+		{"number out of range", strings.NewReader(`{"Small": 300}`), "JSON field 'Small' has a number that is not allowed"},
+		{"bad time value", strings.NewReader(`{"CreatedAt": "yesterday"}`), "JSON input could not be decoded"},
+		{"empty input", strings.NewReader(``), "JSON input is empty"},
+		{"cut-off input", strings.NewReader(`{"Name":`), "JSON input is not valid"},
+		{"reader error", failingReader{}, "JSON input could not be decoded"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, valErrs := sv.ValidateIOReaderCtx(t.Context(), v, test.reader)
+
+			if valErrs == nil {
+				t.Fatalf("Expected an error, got nil")
+			}
+
+			if valErrs["error"].Messages[0] != test.expected {
+				t.Fatalf("Expected '%s', got '%s'", test.expected, valErrs["error"].Messages[0])
+			}
+		})
+	}
+}
+
+// TestJSONTypeName checks the JSON type name for each kind of Go type.
+func TestJSONTypeName(t *testing.T) {
+	tests := []struct {
+		goType   reflect.Type
+		expected string
+	}{
+		{nil, "a different type"},
+		{reflect.TypeFor[*string](), "a string"},
+		{reflect.TypeFor[time.Time](), "a string"},
+		{reflect.TypeFor[[]byte](), "a string"},
+		{reflect.TypeFor[bool](), "a boolean"},
+		{reflect.TypeFor[float64](), "a number"},
+		{reflect.TypeFor[map[string]int](), "an object"},
+		{reflect.TypeFor[[]int](), "an array"},
+		{reflect.TypeFor[[2]int](), "an array"},
+		{reflect.TypeFor[func()](), "a different type"},
+	}
+
+	for _, test := range tests {
+		if got := jsonTypeName(test.goType); got != test.expected {
+			t.Errorf("Expected '%s' for %v, got '%s'", test.expected, test.goType, got)
+		}
 	}
 }
